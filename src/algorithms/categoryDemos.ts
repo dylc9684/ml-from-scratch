@@ -8,9 +8,15 @@ import type {
   ConceptBar,
   ConceptFrame,
   ConceptSeries,
+  ContrastivePair,
+  ContrastivePoint,
   DataPoint,
   EngineResult,
+  LossFunctionKey,
+  LossSurfaceKey,
+  LossPrediction,
   NormalizedDataset,
+  OptimizerKey,
   ParameterState,
 } from "../types/algorithm";
 
@@ -1448,6 +1454,909 @@ function makeActivationNeurons(
   });
 }
 
+const lossFunctions = makeConceptAlgorithm({
+  id: "loss-functions",
+  name: "Loss Functions",
+  category: "Loss Functions — MSE, Cross-Entropy, Contrastive",
+  summary: "Tracks training loss over epochs and shows contrastive pairs pulling or pushing in vector space.",
+  parameters: [
+    {
+      kind: "select",
+      id: "lossFunction",
+      label: "Loss function",
+      defaultValue: "cross-entropy",
+      options: [
+        { label: "Cross-Entropy", value: "cross-entropy" },
+        { label: "MSE", value: "mse" },
+        { label: "Contrastive", value: "contrastive" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "learningRate",
+      label: "Learning rate",
+      min: 0.01,
+      max: 1.4,
+      step: 0.01,
+      defaultValue: 0.18,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "epochs",
+      label: "Epochs",
+      min: 12,
+      max: 120,
+      step: 4,
+      defaultValue: 64,
+      format: "integer",
+    },
+    {
+      kind: "range",
+      id: "margin",
+      label: "Contrastive margin",
+      min: 0.5,
+      max: 3,
+      step: 0.05,
+      defaultValue: 1.35,
+      format: "decimal",
+    },
+  ],
+  sample: makeLossDataset,
+  formulas: [
+    { title: "Mean squared error", expression: "\\operatorname{MSE}=\\frac{1}{N}\\sum_i(\\hat{y}_i-y_i)^2" },
+    { title: "Cross-entropy", expression: "\\operatorname{CE}=-\\frac{1}{N}\\sum_i\\sum_c y_{ic}\\log(\\hat{y}_{ic}+\\epsilon)" },
+    { title: "Contrastive loss", expression: "L=yD^2+(1-y)\\max(0,m-D)^2" },
+  ],
+  explanation: [
+    "A loss function turns model behavior into one scalar objective that training can minimize.",
+    "The loss curve shows whether the current learning rate is helping the model descend or making the objective oscillate upward.",
+    "Contrastive loss works in vector space: similar pairs are pulled together, while dissimilar pairs inside the margin are pushed apart.",
+  ],
+  engine: (_, params) => {
+    const selected = lossKeyParam(params, "lossFunction", "cross-entropy");
+    const learningRate = numberParam(params, "learningRate", 0.18);
+    const epochs = Math.round(numberParam(params, "epochs", 64));
+    const margin = numberParam(params, "margin", 1.35);
+    const mlpTrace = selected === "mse" ? trainMseMlp(epochs, learningRate) : trainCrossEntropyMlp(epochs, learningRate);
+    const contrastiveTrace = trainContrastiveSpace(epochs, learningRate, margin);
+    const selectedHistory =
+      selected === "contrastive" ? contrastiveTrace.lossHistory : mlpTrace.lossHistory;
+    const frames = selectedHistory.map((point, index) => {
+      const contrastiveFrame = contrastiveTrace.frames[Math.min(index, contrastiveTrace.frames.length - 1)];
+      const mlpFrame = mlpTrace.frames[Math.min(index, mlpTrace.frames.length - 1)];
+      const history = selectedHistory.slice(0, index + 1);
+      const status = lossTrendStatus(history);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: point.x,
+        points: history,
+        loss: {
+          selected,
+          epoch: point.x,
+          learningRate,
+          margin,
+          lossHistory: history,
+          currentLoss: point.y,
+          status,
+          predictions: selected === "contrastive" ? contrastivePredictions(contrastiveFrame.pairs) : mlpFrame.predictions,
+          contrastivePairs: contrastiveFrame.pairs,
+        },
+        summary: `${lossLabel(selected)} epoch ${point.x} · loss ${point.y.toFixed(4)} · ${status}`,
+      };
+    });
+    const finalFrame = frames[frames.length - 1].loss;
+    const firstLoss = selectedHistory[0]?.y ?? 0;
+    const finalLoss = finalFrame.currentLoss;
+    const percentDrop = firstLoss > 0 ? Math.max(-9.99, Math.min(0.999, (firstLoss - finalLoss) / firstLoss)) : 0;
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Final loss", value: finalLoss.toFixed(4) },
+        { label: "Loss drop", value: `${Math.round(percentDrop * 100)}%` },
+        { label: "Trend", value: finalFrame.status },
+        { label: "Objective", value: lossLabel(selected) },
+      ],
+    };
+  },
+  python: () => `import numpy as np
+
+eps = 1e-15
+N = y.shape[0]
+
+def mse(y, y_hat):
+    return np.mean((y_hat - y) ** 2)
+
+def cross_entropy(y, y_hat):
+    return -np.sum(y * np.log(y_hat + 1e-15)) / N
+
+def contrastive_loss(anchor, pair, similar, margin=1.35):
+    diff = anchor - pair
+    distance = np.sqrt(np.sum(diff * diff, axis=1) + eps)
+    positive = similar * distance**2
+    negative = (1 - similar) * np.maximum(0, margin - distance)**2
+    return np.mean(positive + negative)
+
+loss = cross_entropy(y_one_hot, y_hat)`,
+  javascript: () => `const EPS = 1e-15;
+
+function mse(y, yHat) {
+  let total = 0;
+  for (let i = 0; i < y.length; i += 1) {
+    total += (yHat[i] - y[i]) ** 2;
+  }
+  return total / y.length;
+}
+
+function crossEntropy(y, yHat) {
+  let total = 0;
+  for (let row = 0; row < y.length; row += 1) {
+    for (let column = 0; column < y[row].length; column += 1) {
+      total -= y[row][column] * Math.log(yHat[row][column] + EPS);
+    }
+  }
+  return total / y.length;
+}
+
+function contrastiveLoss(anchor, pair, similar, margin = 1.35) {
+  const dx = anchor.x - pair.x;
+  const dy = anchor.y - pair.y;
+  const distance = Math.hypot(dx, dy);
+  return similar
+    ? distance ** 2
+    : Math.max(0, margin - distance) ** 2;
+}
+
+const tfLoss = tf.losses.softmaxCrossEntropy(
+  tf.tensor(yOneHot),
+  tf.tensor(yHat),
+);`,
+});
+
+function makeLossDataset() {
+  return makeDataset(
+    "Generated loss training sample",
+    xorTrainingSet().map((item) => ({
+      x: item.x[0],
+      y: item.x[1],
+      label: item.y === 1 ? "positive" : "negative",
+    })),
+  );
+}
+
+function lossKeyParam(
+  params: ParameterState,
+  key: string,
+  fallback: LossFunctionKey,
+): LossFunctionKey {
+  const value = stringParam(params, key, fallback);
+  return value === "mse" || value === "cross-entropy" || value === "contrastive"
+    ? value
+    : fallback;
+}
+
+function xorTrainingSet() {
+  return [
+    { x: [-1, -1] as [number, number], y: 0 },
+    { x: [-1, 1] as [number, number], y: 1 },
+    { x: [1, -1] as [number, number], y: 1 },
+    { x: [1, 1] as [number, number], y: 0 },
+  ];
+}
+
+function trainCrossEntropyMlp(epochs: number, learningRate: number) {
+  const data = xorTrainingSet();
+  const hiddenWidth = 4;
+  const w1 = [
+    [0.45, -0.6, 0.28, 0.7],
+    [-0.35, 0.52, 0.62, -0.24],
+  ];
+  const b1 = [0.02, -0.04, 0.01, 0.03];
+  const w2 = [
+    [0.36, -0.31],
+    [-0.22, 0.41],
+    [0.29, -0.18],
+    [-0.44, 0.35],
+  ];
+  const b2 = [0.02, -0.02];
+  const frames: Array<{ loss: number; predictions: LossPrediction[] }> = [];
+
+  for (let epoch = 1; epoch <= epochs; epoch += 1) {
+    const gradW1 = zeros(2, hiddenWidth);
+    const gradB1 = new Array(hiddenWidth).fill(0);
+    const gradW2 = zeros(hiddenWidth, 2);
+    const gradB2 = [0, 0];
+    let loss = 0;
+    const predictions: LossPrediction[] = [];
+
+    data.forEach((sample, sampleIndex) => {
+      const hiddenRaw = b1.map((bias, hidden) => sample.x[0] * w1[0][hidden] + sample.x[1] * w1[1][hidden] + bias);
+      const hidden = hiddenRaw.map(Math.tanh);
+      const logits = b2.map((bias, output) =>
+        bias + hidden.reduce((total, value, hiddenIndex) => total + value * w2[hiddenIndex][output], 0),
+      );
+      const probabilities = softmax(logits);
+      const target = [sample.y === 0 ? 1 : 0, sample.y === 1 ? 1 : 0];
+      loss += -target.reduce((total, value, classIndex) => total + value * Math.log(probabilities[classIndex] + 1e-15), 0);
+      predictions.push({
+        label: `x${sampleIndex + 1}`,
+        target: sample.y,
+        prediction: probabilities[1],
+      });
+      const deltaOut = probabilities.map((probability, classIndex) => probability - target[classIndex]);
+
+      hidden.forEach((hiddenValue, hiddenIndex) => {
+        deltaOut.forEach((delta, classIndex) => {
+          gradW2[hiddenIndex][classIndex] += hiddenValue * delta;
+        });
+      });
+      deltaOut.forEach((delta, classIndex) => {
+        gradB2[classIndex] += delta;
+      });
+
+      const deltaHidden = hidden.map((hiddenValue, hiddenIndex) => {
+        const flow = deltaOut.reduce((total, delta, classIndex) => total + delta * w2[hiddenIndex][classIndex], 0);
+        return flow * (1 - hiddenValue ** 2);
+      });
+      sample.x.forEach((inputValue, inputIndex) => {
+        deltaHidden.forEach((delta, hiddenIndex) => {
+          gradW1[inputIndex][hiddenIndex] += inputValue * delta;
+        });
+      });
+      deltaHidden.forEach((delta, hiddenIndex) => {
+        gradB1[hiddenIndex] += delta;
+      });
+    });
+
+    const scale = learningRate / data.length;
+    applyMatrixStep(w1, gradW1, scale);
+    applyVectorStep(b1, gradB1, scale);
+    applyMatrixStep(w2, gradW2, scale);
+    applyVectorStep(b2, gradB2, scale);
+    frames.push({ loss: loss / data.length, predictions });
+  }
+
+  return {
+    frames,
+    lossHistory: frames.map((frame, index) => ({ x: index + 1, y: frame.loss, label: "cross-entropy" })),
+  };
+}
+
+function trainMseMlp(epochs: number, learningRate: number) {
+  const data = xorTrainingSet();
+  const hiddenWidth = 4;
+  const w1 = [
+    [0.5, -0.42, 0.36, 0.66],
+    [-0.31, 0.47, 0.58, -0.38],
+  ];
+  const b1 = [0.04, -0.02, 0.02, -0.03];
+  const w2 = [0.42, -0.35, 0.28, -0.46];
+  let b2 = 0.02;
+  const frames: Array<{ loss: number; predictions: LossPrediction[] }> = [];
+
+  for (let epoch = 1; epoch <= epochs; epoch += 1) {
+    const gradW1 = zeros(2, hiddenWidth);
+    const gradB1 = new Array(hiddenWidth).fill(0);
+    const gradW2 = new Array(hiddenWidth).fill(0);
+    let gradB2 = 0;
+    let loss = 0;
+    const predictions: LossPrediction[] = [];
+
+    data.forEach((sample, sampleIndex) => {
+      const hiddenRaw = b1.map((bias, hidden) => sample.x[0] * w1[0][hidden] + sample.x[1] * w1[1][hidden] + bias);
+      const hidden = hiddenRaw.map(Math.tanh);
+      const logit = b2 + hidden.reduce((total, value, hiddenIndex) => total + value * w2[hiddenIndex], 0);
+      const prediction = sigmoid(logit);
+      const error = prediction - sample.y;
+      loss += error ** 2;
+      predictions.push({ label: `x${sampleIndex + 1}`, target: sample.y, prediction });
+
+      const deltaOut = 2 * error * prediction * (1 - prediction);
+      hidden.forEach((hiddenValue, hiddenIndex) => {
+        gradW2[hiddenIndex] += hiddenValue * deltaOut;
+      });
+      gradB2 += deltaOut;
+      const deltaHidden = hidden.map((hiddenValue, hiddenIndex) => deltaOut * w2[hiddenIndex] * (1 - hiddenValue ** 2));
+      sample.x.forEach((inputValue, inputIndex) => {
+        deltaHidden.forEach((delta, hiddenIndex) => {
+          gradW1[inputIndex][hiddenIndex] += inputValue * delta;
+        });
+      });
+      deltaHidden.forEach((delta, hiddenIndex) => {
+        gradB1[hiddenIndex] += delta;
+      });
+    });
+
+    const scale = learningRate / data.length;
+    applyMatrixStep(w1, gradW1, scale);
+    applyVectorStep(b1, gradB1, scale);
+    applyVectorStep(w2, gradW2, scale);
+    b2 -= scale * gradB2;
+    frames.push({ loss: loss / data.length, predictions });
+  }
+
+  return {
+    frames,
+    lossHistory: frames.map((frame, index) => ({ x: index + 1, y: frame.loss, label: "mse" })),
+  };
+}
+
+type ContrastiveTraceFrame = {
+  loss: number;
+  pairs: ContrastivePair[];
+};
+
+function trainContrastiveSpace(epochs: number, learningRate: number, margin: number) {
+  const points = new Map<string, ContrastivePoint>(
+    [
+      { id: "a1", x: -2.1, y: 0.72, label: "A1" },
+      { id: "a2", x: -1.16, y: -0.26, label: "A2" },
+      { id: "a3", x: -2.42, y: -0.84, label: "A3" },
+      { id: "b1", x: 1.44, y: 0.8, label: "B1" },
+      { id: "b2", x: 2.2, y: -0.5, label: "B2" },
+      { id: "b3", x: 1.05, y: -1.12, label: "B3" },
+    ].map((point) => [point.id, { ...point }]),
+  );
+  const pairDefs = [
+    { id: "p1", from: "a1", to: "a2", relation: "similar" as const },
+    { id: "p2", from: "a2", to: "a3", relation: "similar" as const },
+    { id: "p3", from: "b1", to: "b2", relation: "similar" as const },
+    { id: "p4", from: "b2", to: "b3", relation: "similar" as const },
+    { id: "p5", from: "a1", to: "b2", relation: "different" as const },
+    { id: "p6", from: "a3", to: "b3", relation: "different" as const },
+  ];
+  const frames: ContrastiveTraceFrame[] = [];
+  const stepScale = Math.min(0.09, Math.max(0.004, learningRate * 0.04));
+
+  for (let epoch = 1; epoch <= epochs; epoch += 1) {
+    let totalLoss = 0;
+    const pairsForFrame: ContrastivePair[] = [];
+
+    pairDefs.forEach((pair) => {
+      const from = points.get(pair.from);
+      const to = points.get(pair.to);
+      if (!from || !to) {
+        return;
+      }
+
+      const dx = from.x - to.x;
+      const dy = from.y - to.y;
+      const distance = Math.max(0.0001, Math.hypot(dx, dy));
+      let loss = 0;
+      let gradX = 0;
+      let gradY = 0;
+
+      if (pair.relation === "similar") {
+        loss = distance ** 2;
+        gradX = 2 * dx;
+        gradY = 2 * dy;
+      } else if (distance < margin) {
+        const marginError = margin - distance;
+        loss = marginError ** 2;
+        gradX = (-2 * marginError * dx) / distance;
+        gradY = (-2 * marginError * dy) / distance;
+      }
+
+      from.x -= stepScale * gradX;
+      from.y -= stepScale * gradY;
+      to.x += stepScale * gradX;
+      to.y += stepScale * gradY;
+      totalLoss += loss;
+      pairsForFrame.push({
+        id: pair.id,
+        from: { ...from },
+        to: { ...to },
+        relation: pair.relation,
+        distance,
+        loss,
+        gradientMagnitude: Math.hypot(gradX, gradY),
+      });
+    });
+
+    frames.push({ loss: totalLoss / pairDefs.length, pairs: pairsForFrame });
+  }
+
+  return {
+    frames,
+    lossHistory: frames.map((frame, index) => ({ x: index + 1, y: frame.loss, label: "contrastive" })),
+  };
+}
+
+function contrastivePredictions(pairs: ContrastivePair[]): LossPrediction[] {
+  return pairs.slice(0, 4).map((pair) => ({
+    label: pair.id,
+    target: pair.relation === "similar" ? 1 : 0,
+    prediction: pair.distance,
+  }));
+}
+
+function lossTrendStatus(history: DataPoint[]): "converging" | "diverging" | "oscillating" {
+  if (history.length < 5) {
+    return "converging";
+  }
+
+  const first = history[0].y;
+  const last = history[history.length - 1].y;
+  const previous = history[history.length - 2].y;
+  const recent = history.slice(-8).map((point) => point.y);
+  const directionChanges = recent.slice(2).filter((value, index) => {
+    const a = recent[index + 1] - recent[index];
+    const b = value - recent[index + 1];
+    return Math.sign(a) !== Math.sign(b) && Math.abs(a) > 0.002 && Math.abs(b) > 0.002;
+  }).length;
+
+  if (last > first * 1.18 || last > previous * 1.16) {
+    return "diverging";
+  }
+
+  if (directionChanges >= 3) {
+    return "oscillating";
+  }
+
+  return "converging";
+}
+
+function lossLabel(loss: LossFunctionKey) {
+  if (loss === "mse") {
+    return "MSE";
+  }
+
+  if (loss === "contrastive") {
+    return "Contrastive";
+  }
+
+  return "Cross-Entropy";
+}
+
+function zeros(rows: number, columns: number) {
+  return Array.from({ length: rows }, () => new Array(columns).fill(0));
+}
+
+function softmax(logits: number[]) {
+  const max = Math.max(...logits);
+  const exps = logits.map((logit) => Math.exp(logit - max));
+  const total = exps.reduce((sum, value) => sum + value, 0);
+  return exps.map((value) => value / total);
+}
+
+function applyMatrixStep(matrix: number[][], gradients: number[][], scale: number) {
+  matrix.forEach((row, rowIndex) => {
+    row.forEach((_, columnIndex) => {
+      row[columnIndex] -= scale * gradients[rowIndex][columnIndex];
+    });
+  });
+}
+
+function applyVectorStep(values: number[], gradients: number[], scale: number) {
+  values.forEach((_, index) => {
+    values[index] -= scale * gradients[index];
+  });
+}
+
+const optimizerRace = makeConceptAlgorithm({
+  id: "optimizer-race",
+  name: "Optimizer Race",
+  category: "SGD, Momentum, Adam, AdamW",
+  summary: "Races SGD, Momentum, Adam, and AdamW across a ravine-shaped loss surface.",
+  parameters: [
+    {
+      kind: "select",
+      id: "surface",
+      label: "Loss surface",
+      defaultValue: "rosenbrock",
+      options: [
+        { label: "Rosenbrock banana", value: "rosenbrock" },
+        { label: "Beale function", value: "beale" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "learningRate",
+      label: "Learning rate eta",
+      min: 0.001,
+      max: 0.08,
+      step: 0.001,
+      defaultValue: 0.018,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "beta1",
+      label: "beta1",
+      min: 0.2,
+      max: 0.99,
+      step: 0.01,
+      defaultValue: 0.9,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "beta2",
+      label: "beta2",
+      min: 0.7,
+      max: 0.999,
+      step: 0.001,
+      defaultValue: 0.98,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "weightDecay",
+      label: "Weight decay lambda",
+      min: 0,
+      max: 0.2,
+      step: 0.005,
+      defaultValue: 0.035,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "startX",
+      label: "Start x",
+      min: -2.2,
+      max: 2.2,
+      step: 0.1,
+      defaultValue: -1.4,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "startY",
+      label: "Start y",
+      min: -1.2,
+      max: 2.8,
+      step: 0.1,
+      defaultValue: 2.1,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "steps",
+      label: "Race steps",
+      min: 30,
+      max: 150,
+      step: 5,
+      defaultValue: 90,
+      format: "integer",
+    },
+  ],
+  sample: makeOptimizerDataset,
+  formulas: [
+    { title: "SGD", expression: "\\theta_t=\\theta_{t-1}-\\eta\\nabla L(\\theta_{t-1})" },
+    { title: "Momentum", expression: "v_t=\\beta v_{t-1}+\\eta\\nabla L(\\theta),\\quad \\theta_t=\\theta_{t-1}-v_t" },
+    { title: "Adam", expression: "m_t=\\beta_1m_{t-1}+(1-\\beta_1)g_t,\\;v_t=\\beta_2v_{t-1}+(1-\\beta_2)g_t^2" },
+    { title: "AdamW", expression: "\\theta_t=\\theta_{t-1}-\\eta\\left(\\frac{\\hat{m}_t}{\\sqrt{\\hat{v}_t}+\\epsilon}+\\lambda\\theta_{t-1}\\right)" },
+  ],
+  explanation: [
+    "Optimizers are update rules for moving parameters downhill on a loss surface.",
+    "SGD follows the raw gradient, Momentum accumulates velocity, Adam scales each coordinate by a running second moment, and AdamW decouples weight decay from the gradient estimate.",
+    "The adaptive-rate graph shows why Adam calms large-gradient weights: a bigger denominator sqrt(v-hat) compresses that parameter's effective step size.",
+  ],
+  engine: (_, params) => {
+    const surface = surfaceParam(params, "surface", "rosenbrock");
+    const learningRate = numberParam(params, "learningRate", 0.018);
+    const beta1 = numberParam(params, "beta1", 0.9);
+    const beta2 = numberParam(params, "beta2", 0.98);
+    const weightDecay = numberParam(params, "weightDecay", 0.035);
+    const steps = Math.round(numberParam(params, "steps", 90));
+    const rawStart = {
+      x: numberParam(params, "startX", -1.4),
+      y: numberParam(params, "startY", 2.1),
+    };
+    const start = clampSurfacePoint(surface, rawStart);
+    const histories = runOptimizerRace(surface, start, steps, learningRate, beta1, beta2, weightDecay);
+    const frames = Array.from({ length: steps + 1 }, (_, step) => {
+      const runners = optimizerDefinitions.map((optimizer) => {
+        const history = histories[optimizer.id].slice(0, step + 1);
+        return {
+          id: optimizer.id,
+          label: optimizer.label,
+          color: optimizer.color,
+          history,
+          position: history[history.length - 1],
+        };
+      });
+      const leader = [...runners].sort((a, b) => a.position.z - b.position.z)[0];
+
+      return {
+        type: "concept-demo" as const,
+        iteration: step,
+        points: runners.map((runner) => ({ x: runner.position.x, y: runner.position.z, label: runner.label })),
+        optimizer: {
+          surface,
+          step,
+          learningRate,
+          beta1,
+          beta2,
+          weightDecay,
+          start,
+          runners,
+          adaptiveWeights: makeAdaptiveOptimizerWeights(step, learningRate, beta1, beta2, weightDecay),
+        },
+        summary: `Step ${step} · leader ${leader.label} · loss ${leader.position.z.toFixed(4)} · eta ${learningRate.toFixed(3)}`,
+      };
+    });
+    const final = frames[frames.length - 1].optimizer;
+    const finalRunners = final.runners;
+    const leader = [...finalRunners].sort((a, b) => a.position.z - b.position.z)[0];
+    const adam = finalRunners.find((runner) => runner.id === "adam");
+    const sgd = finalRunners.find((runner) => runner.id === "sgd");
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Leader", value: leader.label },
+        { label: "Leader loss", value: leader.position.z.toFixed(4) },
+        { label: "Adam loss", value: adam ? adam.position.z.toFixed(4) : "-" },
+        { label: "SGD loss", value: sgd ? sgd.position.z.toFixed(4) : "-" },
+      ],
+    };
+  },
+  python: (params) => `class AdamWFromScratch:
+    def __init__(self, lr=${numberParam(params, "learningRate", 0.018)}, beta1=${numberParam(params, "beta1", 0.9)}, beta2=${numberParam(params, "beta2", 0.98)}, weight_decay=${numberParam(params, "weightDecay", 0.035)}):
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.weight_decay = weight_decay
+        self.t = 0
+        self.m = {}
+        self.v = {}
+
+    def step(self, weights, grads):
+        self.t += 1
+        for w_id, dw in grads.items():
+            self.m[w_id] = self.beta1 * self.m.get(w_id, 0.0) + (1 - self.beta1) * dw
+            self.v[w_id] = self.beta2 * self.v.get(w_id, 0.0) + (1 - self.beta2) * (dw ** 2)
+            m_hat = self.m[w_id] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[w_id] / (1 - self.beta2 ** self.t)
+            adam_step = m_hat / ((v_hat ** 0.5) + 1e-8)
+            weights[w_id] -= self.lr * (adam_step + self.weight_decay * weights[w_id])
+
+        return weights`,
+  javascript: (params) => `const state = { m: {}, v: {}, t: 0 };
+const lr = ${numberParam(params, "learningRate", 0.018)};
+const beta1 = ${numberParam(params, "beta1", 0.9)};
+const beta2 = ${numberParam(params, "beta2", 0.98)};
+const weightDecay = ${numberParam(params, "weightDecay", 0.035)};
+
+function adamWStep(weights, gradients) {
+  state.t += 1;
+  for (const [wId, dw] of Object.entries(gradients)) {
+    state.m[wId] = beta1 * (state.m[wId] ?? 0) + (1 - beta1) * dw;
+    state.v[wId] = beta2 * (state.v[wId] ?? 0) + (1 - beta2) * dw ** 2;
+    const mHat = state.m[wId] / (1 - beta1 ** state.t);
+    const vHat = state.v[wId] / (1 - beta2 ** state.t);
+    const adaptiveStep = mHat / (Math.sqrt(vHat) + 1e-8);
+    weights[wId] -= lr * (adaptiveStep + weightDecay * weights[wId]);
+  }
+}
+
+const tfAdamW = tf.train.adam(lr, beta1, beta2);
+// Apply decoupled weight decay manually around tfAdamW if needed.`,
+});
+
+const optimizerDefinitions: Array<{ id: OptimizerKey; label: string; color: string }> = [
+  { id: "sgd", label: "SGD", color: "#d34a43" },
+  { id: "momentum", label: "Momentum", color: "#b7791f" },
+  { id: "adam", label: "Adam", color: "#2f6fbe" },
+  { id: "adamw", label: "AdamW", color: "#0f766e" },
+];
+
+function makeOptimizerDataset() {
+  return makeDataset(
+    "Optimizer surface starts",
+    optimizerDefinitions.map((optimizer, index) => ({
+      x: -1.4 + index * 0.06,
+      y: 2.1 - index * 0.06,
+      label: optimizer.label,
+    })),
+  );
+}
+
+function surfaceParam(
+  params: ParameterState,
+  key: string,
+  fallback: LossSurfaceKey,
+): LossSurfaceKey {
+  const value = stringParam(params, key, fallback);
+  return value === "beale" || value === "rosenbrock" ? value : fallback;
+}
+
+function runOptimizerRace(
+  surface: LossSurfaceKey,
+  start: { x: number; y: number },
+  steps: number,
+  learningRate: number,
+  beta1: number,
+  beta2: number,
+  weightDecay: number,
+) {
+  const histories = Object.fromEntries(
+    optimizerDefinitions.map((optimizer) => [
+      optimizer.id,
+      [{ step: 0, x: start.x, y: start.y, z: surfaceValue(surface, start.x, start.y) }],
+    ]),
+  ) as Record<OptimizerKey, Array<{ step: number; x: number; y: number; z: number }>>;
+  const states = Object.fromEntries(
+    optimizerDefinitions.map((optimizer) => [
+      optimizer.id,
+      {
+        x: start.x,
+        y: start.y,
+        velocity: [0, 0],
+        m: [0, 0],
+        v: [0, 0],
+      },
+    ]),
+  ) as Record<OptimizerKey, { x: number; y: number; velocity: number[]; m: number[]; v: number[] }>;
+
+  for (let step = 1; step <= steps; step += 1) {
+    optimizerDefinitions.forEach((optimizer) => {
+      const state = states[optimizer.id];
+      const gradient = clippedGradient(surfaceGradient(surface, state.x, state.y), 90);
+      const next = optimizerStep(optimizer.id, state, gradient, step, learningRate, beta1, beta2, weightDecay);
+      const clamped = clampSurfacePoint(surface, next);
+      state.x = clamped.x;
+      state.y = clamped.y;
+      histories[optimizer.id].push({
+        step,
+        x: state.x,
+        y: state.y,
+        z: surfaceValue(surface, state.x, state.y),
+      });
+    });
+  }
+
+  return histories;
+}
+
+function optimizerStep(
+  optimizer: OptimizerKey,
+  state: { x: number; y: number; velocity: number[]; m: number[]; v: number[] },
+  gradient: [number, number],
+  step: number,
+  learningRate: number,
+  beta1: number,
+  beta2: number,
+  weightDecay: number,
+) {
+  if (optimizer === "sgd") {
+    const wobble = Math.sin(step * 0.8) * learningRate * 1.4;
+    return {
+      x: state.x - learningRate * gradient[0] + wobble,
+      y: state.y - learningRate * gradient[1] - wobble * 0.5,
+    };
+  }
+
+  if (optimizer === "momentum") {
+    state.velocity[0] = beta1 * state.velocity[0] + learningRate * gradient[0];
+    state.velocity[1] = beta1 * state.velocity[1] + learningRate * gradient[1];
+    return {
+      x: state.x - state.velocity[0],
+      y: state.y - state.velocity[1],
+    };
+  }
+
+  state.m[0] = beta1 * state.m[0] + (1 - beta1) * gradient[0];
+  state.m[1] = beta1 * state.m[1] + (1 - beta1) * gradient[1];
+  state.v[0] = beta2 * state.v[0] + (1 - beta2) * gradient[0] ** 2;
+  state.v[1] = beta2 * state.v[1] + (1 - beta2) * gradient[1] ** 2;
+  const mHat = [
+    state.m[0] / (1 - beta1 ** step),
+    state.m[1] / (1 - beta1 ** step),
+  ];
+  const vHat = [
+    state.v[0] / (1 - beta2 ** step),
+    state.v[1] / (1 - beta2 ** step),
+  ];
+  const adamMove = [
+    learningRate * mHat[0] / (Math.sqrt(vHat[0]) + 1e-8),
+    learningRate * mHat[1] / (Math.sqrt(vHat[1]) + 1e-8),
+  ];
+
+  if (optimizer === "adamw") {
+    return {
+      x: state.x - adamMove[0] - learningRate * weightDecay * state.x,
+      y: state.y - adamMove[1] - learningRate * weightDecay * state.y,
+    };
+  }
+
+  return {
+    x: state.x - adamMove[0],
+    y: state.y - adamMove[1],
+  };
+}
+
+function surfaceValue(surface: LossSurfaceKey, x: number, y: number) {
+  if (surface === "beale") {
+    return (1.5 - x + x * y) ** 2 + (2.25 - x + x * y ** 2) ** 2 + (2.625 - x + x * y ** 3) ** 2;
+  }
+
+  return (1 - x) ** 2 + 100 * (y - x ** 2) ** 2;
+}
+
+function surfaceGradient(surface: LossSurfaceKey, x: number, y: number): [number, number] {
+  if (surface === "beale") {
+    const a = 1.5 - x + x * y;
+    const b = 2.25 - x + x * y ** 2;
+    const c = 2.625 - x + x * y ** 3;
+    return [
+      2 * a * (-1 + y) + 2 * b * (-1 + y ** 2) + 2 * c * (-1 + y ** 3),
+      2 * a * x + 4 * b * x * y + 6 * c * x * y ** 2,
+    ];
+  }
+
+  return [
+    -2 * (1 - x) - 400 * x * (y - x ** 2),
+    200 * (y - x ** 2),
+  ];
+}
+
+function clippedGradient(gradient: [number, number], maxNorm: number): [number, number] {
+  const norm = Math.hypot(gradient[0], gradient[1]);
+  if (norm <= maxNorm) {
+    return gradient;
+  }
+
+  const scale = maxNorm / norm;
+  return [gradient[0] * scale, gradient[1] * scale];
+}
+
+function clampSurfacePoint(surface: LossSurfaceKey, point: { x: number; y: number }) {
+  const bounds = surfaceBounds(surface);
+  return {
+    x: Math.max(bounds.x[0], Math.min(bounds.x[1], point.x)),
+    y: Math.max(bounds.y[0], Math.min(bounds.y[1], point.y)),
+  };
+}
+
+function surfaceBounds(surface: LossSurfaceKey) {
+  if (surface === "beale") {
+    return { x: [-4.5, 4.5] as [number, number], y: [-4.5, 4.5] as [number, number] };
+  }
+
+  return { x: [-2.2, 2.2] as [number, number], y: [-1.2, 2.8] as [number, number] };
+}
+
+function makeAdaptiveOptimizerWeights(
+  step: number,
+  learningRate: number,
+  beta1: number,
+  beta2: number,
+  weightDecay: number,
+) {
+  const edges = [
+    ["x1", "h1"],
+    ["x1", "h2"],
+    ["x1", "h3"],
+    ["x2", "h1"],
+    ["x2", "h2"],
+    ["x2", "h3"],
+    ["h1", "y"],
+    ["h2", "y"],
+    ["h3", "y"],
+  ];
+
+  return edges.map(([from, to], index) => {
+    const raw = Math.abs(Math.sin(step * 0.19 + index * 0.77) * (1.1 + (index % 3) * 0.48));
+    const gradient = raw + weightDecay * 0.35 + (index % 2 === 0 ? 0.12 : 0.03);
+    const vHat = (gradient ** 2) * (1 - beta2 ** Math.max(1, step + 1)) / Math.max(0.0001, 1 - beta2);
+    const denominator = Math.sqrt(vHat) + 1e-8;
+    const mCompression = 1 - beta1 ** Math.max(1, step + 1);
+    return {
+      from,
+      to,
+      gradient,
+      denominator,
+      adaptiveRate: learningRate * mCompression / denominator,
+    };
+  });
+}
+
 const backpropagationFromScratch = makeConceptAlgorithm({
   id: "backpropagation-from-scratch",
   name: "Backpropagation from Scratch",
@@ -2113,5 +3022,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   neuralNetwork,
   multiLayerNetwork,
   activationFunctions,
+  lossFunctions,
+  optimizerRace,
   backpropagationFromScratch,
 ];

@@ -420,7 +420,9 @@ h1 {
 }
 
 .visual-shell.backprop-shell,
-.visual-shell.activation-shell {
+.visual-shell.activation-shell,
+.visual-shell.loss-shell,
+.visual-shell.optimizer-shell {
   min-height: 620px;
 }
 
@@ -432,7 +434,9 @@ h1 {
 }
 
 .visual-shell.backprop-shell canvas,
-.visual-shell.activation-shell canvas {
+.visual-shell.activation-shell canvas,
+.visual-shell.loss-shell canvas,
+.visual-shell.optimizer-shell canvas {
   min-height: 620px;
 }
 
@@ -887,7 +891,11 @@ select {
   .visual-shell.backprop-shell,
   .visual-shell.backprop-shell canvas,
   .visual-shell.activation-shell,
-  .visual-shell.activation-shell canvas {
+  .visual-shell.activation-shell canvas,
+  .visual-shell.loss-shell,
+  .visual-shell.loss-shell canvas,
+  .visual-shell.optimizer-shell,
+  .visual-shell.optimizer-shell canvas {
     min-height: 760px;
   }
 }

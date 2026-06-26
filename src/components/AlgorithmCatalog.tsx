@@ -126,6 +126,10 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Multi-Layer Networks": "Deep feed-forward topologies with stacked hidden layers.",
   "Activation Functions — ReLU, Sigmoid, GELU":
     "Nonlinearities, gradients, saturation, and dying-neuron behavior.",
+  "Loss Functions — MSE, Cross-Entropy, Contrastive":
+    "Training objectives, loss curves, and metric-learning distances.",
+  "SGD, Momentum, Adam, AdamW":
+    "Optimizer trajectories, adaptive rates, momentum, and decoupled decay.",
   "Backpropagation from scratch":
     "Forward activations, backward deltas, and gradient updates by hand.",
 };

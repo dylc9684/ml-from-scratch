@@ -7,9 +7,13 @@ import type {
   AlgorithmDefinition,
   AlgorithmFrame,
   ConceptFrame,
+  ContrastivePair,
   DataPoint,
   KMeansFrame,
   LinearRegressionFrame,
+  LossFunctionKey,
+  LossSurfaceKey,
+  OptimizerRunnerState,
 } from "../types/algorithm";
 
 const colors = ["#0f766e", "#2f6fbe", "#b7791f", "#d34a43", "#6f58c9", "#258f66"];
@@ -29,6 +33,8 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
   const [size, setSize] = useState<Size>({ width: 820, height: 520 });
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
+  const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);
+  const isOptimizerLesson = frame?.type === "concept-demo" && Boolean(frame.optimizer);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,7 +67,7 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
     <section
       className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""} ${
         isActivationLesson ? "activation-shell" : ""
-      }`}
+      } ${isLossLesson ? "loss-shell" : ""} ${isOptimizerLesson ? "optimizer-shell" : ""}`}
       aria-label={`${algorithm.name} visualization`}
     >
       <canvas ref={canvasRef} />
@@ -106,6 +112,16 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.activation) {
     paintActivationLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.loss) {
+    paintLossLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.optimizer) {
+    paintOptimizerLesson(context, frame, size);
     return;
   }
 
@@ -683,6 +699,762 @@ function activationLabel(selected: ActivationFunctionKey) {
   }
 
   return "Sigmoid";
+}
+
+function paintLossLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const loss = frame.loss;
+  if (!loss) {
+    return;
+  }
+
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  const curvePane = narrow
+    ? {
+        x: padding,
+        y: 52,
+        width: size.width - padding * 2,
+        height: Math.max(260, size.height * 0.44),
+      }
+    : {
+        x: padding,
+        y: 52,
+        width: Math.max(390, size.width * 0.58),
+        height: size.height - 92,
+      };
+  const vectorPane = narrow
+    ? {
+        x: padding,
+        y: curvePane.y + curvePane.height + gap + 28,
+        width: size.width - padding * 2,
+        height: Math.max(230, size.height - curvePane.y - curvePane.height - gap - 58),
+      }
+    : {
+        x: curvePane.x + curvePane.width + gap,
+        y: 52,
+        width: size.width - curvePane.x - curvePane.width - gap - padding,
+        height: size.height - 92,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Real-time loss curve monitor", curvePane.x, curvePane.y - 24);
+  context.fillText("Contrastive vector space", vectorPane.x, vectorPane.y - 24);
+
+  paintLossCurvePane(context, loss, curvePane);
+  paintContrastivePane(context, loss.contrastivePairs, loss.selected, loss.margin, vectorPane);
+}
+
+function paintLossCurvePane(
+  context: CanvasRenderingContext2D,
+  loss: NonNullable<ConceptFrame["loss"]>,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  const margin = { top: 46, right: 22, bottom: 92, left: 54 };
+  const plot = {
+    x: pane.x + margin.left,
+    y: pane.y + margin.top,
+    width: Math.max(160, pane.width - margin.left - margin.right),
+    height: Math.max(135, pane.height - margin.top - margin.bottom),
+  };
+  const history = loss.lossHistory;
+  const maxEpoch = Math.max(12, history[history.length - 1]?.x ?? 12);
+  const maxLoss = Math.max(0.1, ...history.map((point) => point.y)) * 1.18;
+  const xScale = d3.scaleLinear().domain([1, maxEpoch]).range([plot.x, plot.x + plot.width]);
+  const yScale = d3.scaleLinear().domain([0, maxLoss]).range([plot.y + plot.height, plot.y]);
+  const color = lossStatusColor(loss.status);
+
+  context.fillStyle =
+    loss.status === "diverging"
+      ? "rgba(211, 74, 67, 0.06)"
+      : loss.status === "oscillating"
+        ? "rgba(183, 121, 31, 0.07)"
+        : "rgba(15, 118, 110, 0.055)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+
+  context.strokeStyle = "rgba(97, 112, 127, 0.2)";
+  context.lineWidth = 1;
+  xScale.ticks(5).forEach((tick) => {
+    context.beginPath();
+    context.moveTo(xScale(tick), plot.y);
+    context.lineTo(xScale(tick), plot.y + plot.height);
+    context.stroke();
+  });
+  yScale.ticks(5).forEach((tick) => {
+    context.beginPath();
+    context.moveTo(plot.x, yScale(tick));
+    context.lineTo(plot.x + plot.width, yScale(tick));
+    context.stroke();
+  });
+
+  context.strokeStyle = "#aebbc5";
+  context.lineWidth = 1.2;
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  if (history.length > 0) {
+    context.save();
+    context.beginPath();
+    context.rect(plot.x, plot.y, plot.width, plot.height);
+    context.clip();
+    context.strokeStyle = color;
+    context.lineWidth = 3;
+    context.beginPath();
+    history.forEach((point, index) => {
+      const x = xScale(point.x);
+      const y = yScale(point.y);
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.stroke();
+
+    const current = history[history.length - 1];
+    context.shadowBlur = 14;
+    context.shadowColor = color;
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(xScale(current.x), yScale(current.y), 6.5, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  xScale.ticks(5).forEach((tick) => {
+    context.fillText(String(Math.round(tick)), xScale(tick), plot.y + plot.height + 18);
+  });
+  context.fillText("Epochs", plot.x + plot.width / 2, plot.y + plot.height + 38);
+
+  context.textAlign = "right";
+  yScale.ticks(5).forEach((tick) => {
+    context.fillText(tick.toFixed(2), plot.x - 8, yScale(tick) + 3);
+  });
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    `${lossDisplayName(loss.selected)} · epoch ${loss.epoch} · loss ${loss.currentLoss.toFixed(4)}`,
+    pane.x + 14,
+    pane.y + 22,
+  );
+  context.fillStyle = color;
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText(`trend: ${loss.status}`, pane.x + 14, pane.y + 41);
+
+  paintLossPredictionStrip(context, loss, {
+    x: pane.x + 14,
+    y: pane.y + pane.height - 55,
+    width: pane.width - 28,
+    height: 40,
+  });
+
+  context.restore();
+}
+
+function paintLossPredictionStrip(
+  context: CanvasRenderingContext2D,
+  loss: NonNullable<ConceptFrame["loss"]>,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  const items = loss.predictions.slice(0, 4);
+  if (items.length === 0) {
+    return;
+  }
+
+  const gap = 8;
+  const width = (pane.width - gap * (items.length - 1)) / items.length;
+  items.forEach((item, index) => {
+    const x = pane.x + index * (width + gap);
+    const prediction = loss.selected === "contrastive" ? Math.min(1, item.prediction / Math.max(0.1, loss.margin)) : item.prediction;
+    context.fillStyle = "#f7fafc";
+    context.strokeStyle = "#dce5ea";
+    context.fillRect(x, pane.y, width, pane.height);
+    context.strokeRect(x, pane.y, width, pane.height);
+    context.fillStyle = item.target >= 0.5 ? "#2f6fbe" : "#0f766e";
+    context.fillRect(x + 8, pane.y + pane.height - 11, Math.max(2, (width - 16) * prediction), 4);
+    context.fillStyle = "#17212b";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(item.label, x + 8, pane.y + 13);
+    context.fillStyle = "#61707f";
+    context.font = "700 9px Inter, system-ui, sans-serif";
+    context.fillText(
+      loss.selected === "contrastive" ? `d=${item.prediction.toFixed(2)}` : `p=${item.prediction.toFixed(2)}`,
+      x + 8,
+      pane.y + 26,
+    );
+  });
+}
+
+function paintContrastivePane(
+  context: CanvasRenderingContext2D,
+  pairs: ContrastivePair[],
+  selected: LossFunctionKey,
+  margin: number,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  const points = uniqueContrastivePoints(pairs);
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const xPad = Math.max(0.35, (Math.max(...xs) - Math.min(...xs)) * 0.16);
+  const yPad = Math.max(0.35, (Math.max(...ys) - Math.min(...ys)) * 0.16);
+  const marginBox = { top: 54, right: 22, bottom: 34, left: 34 };
+  const plot = {
+    x: pane.x + marginBox.left,
+    y: pane.y + marginBox.top,
+    width: Math.max(130, pane.width - marginBox.left - marginBox.right),
+    height: Math.max(130, pane.height - marginBox.top - marginBox.bottom),
+  };
+  const xScale = d3
+    .scaleLinear()
+    .domain([Math.min(...xs) - xPad, Math.max(...xs) + xPad])
+    .range([plot.x, plot.x + plot.width]);
+  const yScale = d3
+    .scaleLinear()
+    .domain([Math.min(...ys) - yPad, Math.max(...ys) + yPad])
+    .range([plot.y + plot.height, plot.y]);
+  const active = selected === "contrastive";
+
+  context.fillStyle = active ? "rgba(47, 111, 190, 0.045)" : "rgba(97, 112, 127, 0.045)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#c9d4da";
+  context.lineWidth = 1;
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  pairs.forEach((pair) => {
+    const fromX = xScale(pair.from.x);
+    const fromY = yScale(pair.from.y);
+    const toX = xScale(pair.to.x);
+    const toY = yScale(pair.to.y);
+    const color = pair.relation === "similar" ? "#0f766e" : "#d34a43";
+    const magnitude = Math.min(1, pair.gradientMagnitude / 3);
+
+    context.save();
+    context.globalAlpha = active ? 0.34 + magnitude * 0.44 : 0.18;
+    context.strokeStyle = color;
+    context.lineWidth = 1.2 + magnitude * 4;
+    if (pair.relation === "different") {
+      context.setLineDash([6, 5]);
+    }
+    context.beginPath();
+    context.moveTo(fromX, fromY);
+    context.lineTo(toX, toY);
+    context.stroke();
+    context.restore();
+
+    paintContrastiveForce(context, fromX, fromY, toX, toY, pair.relation, color, active);
+  });
+
+  points.forEach((point) => {
+    const color = point.id.startsWith("a") ? "#2f6fbe" : "#b7791f";
+    const x = xScale(point.x);
+    const y = yScale(point.y);
+    context.beginPath();
+    context.fillStyle = "#ffffff";
+    context.strokeStyle = color;
+    context.lineWidth = 2.5;
+    context.arc(x, y, 8.5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#17212b";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(point.label, x, y - 12);
+  });
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(active ? "Active contrastive step" : "Contrastive reference", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `similar pairs pull together · different pairs push until margin ${margin.toFixed(2)}`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  context.restore();
+}
+
+function paintContrastiveForce(
+  context: CanvasRenderingContext2D,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  relation: "similar" | "different",
+  color: string,
+  active: boolean,
+) {
+  if (!active) {
+    return;
+  }
+
+  const midX = (fromX + toX) / 2;
+  const midY = (fromY + toY) / 2;
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const unitX = dx / length;
+  const unitY = dy / length;
+  const offset = relation === "similar" ? 14 : -14;
+
+  context.save();
+  context.fillStyle = color;
+  context.globalAlpha = 0.75;
+  [-1, 1].forEach((side) => {
+    const x = midX + unitX * offset * side;
+    const y = midY + unitY * offset * side;
+    context.beginPath();
+    context.arc(x, y, 3.2, 0, Math.PI * 2);
+    context.fill();
+  });
+  context.restore();
+}
+
+function uniqueContrastivePoints(pairs: ContrastivePair[]) {
+  const map = new Map<string, ContrastivePair["from"]>();
+  pairs.forEach((pair) => {
+    map.set(pair.from.id, pair.from);
+    map.set(pair.to.id, pair.to);
+  });
+  return [...map.values()];
+}
+
+function lossStatusColor(status: NonNullable<ConceptFrame["loss"]>["status"]) {
+  if (status === "diverging") {
+    return "#d34a43";
+  }
+
+  if (status === "oscillating") {
+    return "#b7791f";
+  }
+
+  return "#0f766e";
+}
+
+function lossDisplayName(loss: LossFunctionKey) {
+  if (loss === "mse") {
+    return "MSE";
+  }
+
+  if (loss === "contrastive") {
+    return "Contrastive";
+  }
+
+  return "Cross-Entropy";
+}
+
+function paintOptimizerLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const optimizer = frame.optimizer;
+  if (!optimizer) {
+    return;
+  }
+
+  const narrow = size.width < 780;
+  const padding = 24;
+  const gap = 18;
+  const surfacePane = narrow
+    ? {
+        x: padding,
+        y: 52,
+        width: size.width - padding * 2,
+        height: Math.max(310, size.height * 0.52),
+      }
+    : {
+        x: padding,
+        y: 52,
+        width: Math.max(430, size.width * 0.62),
+        height: size.height - 92,
+      };
+  const adaptivePane = narrow
+    ? {
+        x: padding,
+        y: surfacePane.y + surfacePane.height + gap + 28,
+        width: size.width - padding * 2,
+        height: Math.max(230, size.height - surfacePane.y - surfacePane.height - gap - 58),
+      }
+    : {
+        x: surfacePane.x + surfacePane.width + gap,
+        y: 52,
+        width: size.width - surfacePane.x - surfacePane.width - gap - padding,
+        height: size.height - 92,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Loss surface optimization race", surfacePane.x, surfacePane.y - 24);
+  context.fillText("Adam adaptive learning rates", adaptivePane.x, adaptivePane.y - 24);
+
+  paintOptimizerSurfacePane(context, optimizer, surfacePane);
+  paintAdaptiveOptimizerPane(context, optimizer, adaptivePane);
+}
+
+function paintOptimizerSurfacePane(
+  context: CanvasRenderingContext2D,
+  optimizer: NonNullable<ConceptFrame["optimizer"]>,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`${optimizerSurfaceLabel(optimizer.surface)} · step ${optimizer.step}`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `eta ${optimizer.learningRate.toFixed(3)} · beta1 ${optimizer.beta1.toFixed(2)} · beta2 ${optimizer.beta2.toFixed(3)} · lambda ${optimizer.weightDecay.toFixed(3)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const plot = {
+    x: pane.x + 20,
+    y: pane.y + 58,
+    width: pane.width - 40,
+    height: pane.height - 82,
+  };
+
+  paintOptimizerMesh(context, optimizer.surface, plot);
+  paintOptimizerMinimum(context, optimizer.surface, plot);
+  optimizer.runners.forEach((runner) => {
+    paintOptimizerTrace(context, optimizer.surface, runner, plot);
+  });
+
+  context.restore();
+}
+
+function paintOptimizerMesh(
+  context: CanvasRenderingContext2D,
+  surface: LossSurfaceKey,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  const bounds = optimizerSurfaceBounds(surface);
+  const lines = 24;
+
+  context.save();
+  context.beginPath();
+  context.rect(pane.x, pane.y, pane.width, pane.height);
+  context.clip();
+  context.fillStyle = "rgba(247, 250, 252, 0.86)";
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+
+  for (let row = 0; row <= lines; row += 1) {
+    const y = bounds.y[0] + (row / lines) * (bounds.y[1] - bounds.y[0]);
+    drawOptimizerSurfaceLine(
+      context,
+      surface,
+      pane,
+      Array.from({ length: lines + 1 }, (_, column) => ({
+        x: bounds.x[0] + (column / lines) * (bounds.x[1] - bounds.x[0]),
+        y,
+      })),
+    );
+  }
+
+  for (let column = 0; column <= lines; column += 1) {
+    const x = bounds.x[0] + (column / lines) * (bounds.x[1] - bounds.x[0]);
+    drawOptimizerSurfaceLine(
+      context,
+      surface,
+      pane,
+      Array.from({ length: lines + 1 }, (_, row) => ({
+        x,
+        y: bounds.y[0] + (row / lines) * (bounds.y[1] - bounds.y[0]),
+      })),
+    );
+  }
+
+  context.restore();
+}
+
+function drawOptimizerSurfaceLine(
+  context: CanvasRenderingContext2D,
+  surface: LossSurfaceKey,
+  pane: { x: number; y: number; width: number; height: number },
+  points: Array<{ x: number; y: number }>,
+) {
+  context.beginPath();
+  points.forEach((point, index) => {
+    const projected = projectOptimizerPoint(surface, point.x, point.y, optimizerSurfaceValue(surface, point.x, point.y), pane);
+    if (index === 0) {
+      context.moveTo(projected.x, projected.y);
+    } else {
+      context.lineTo(projected.x, projected.y);
+    }
+  });
+  context.strokeStyle = "rgba(97, 112, 127, 0.22)";
+  context.lineWidth = 0.8;
+  context.stroke();
+}
+
+function paintOptimizerTrace(
+  context: CanvasRenderingContext2D,
+  surface: LossSurfaceKey,
+  runner: OptimizerRunnerState,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  if (runner.history.length === 0) {
+    return;
+  }
+
+  context.save();
+  context.beginPath();
+  context.rect(pane.x, pane.y, pane.width, pane.height);
+  context.clip();
+  context.strokeStyle = runner.color;
+  context.lineWidth = 3;
+  context.globalAlpha = 0.9;
+  context.beginPath();
+  runner.history.forEach((point, index) => {
+    const projected = projectOptimizerPoint(surface, point.x, point.y, point.z, pane);
+    if (index === 0) {
+      context.moveTo(projected.x, projected.y);
+    } else {
+      context.lineTo(projected.x, projected.y);
+    }
+  });
+  context.stroke();
+
+  const current = runner.position;
+  const projected = projectOptimizerPoint(surface, current.x, current.y, current.z, pane);
+  context.shadowBlur = 16;
+  context.shadowColor = runner.color;
+  context.fillStyle = runner.color;
+  context.beginPath();
+  context.arc(projected.x, projected.y, 6.8, 0, Math.PI * 2);
+  context.fill();
+  context.shadowBlur = 0;
+  context.fillStyle = "#17212b";
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(runner.label, projected.x + 9, projected.y - 7);
+  context.fillStyle = "#61707f";
+  context.font = "700 9px Inter, system-ui, sans-serif";
+  context.fillText(`L=${current.z.toFixed(current.z > 99 ? 0 : 2)}`, projected.x + 9, projected.y + 6);
+  context.restore();
+}
+
+function paintOptimizerMinimum(
+  context: CanvasRenderingContext2D,
+  surface: LossSurfaceKey,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  const minimum = surface === "beale" ? { x: 3, y: 0.5, z: 0 } : { x: 1, y: 1, z: 0 };
+  const point = projectOptimizerPoint(surface, minimum.x, minimum.y, minimum.z, pane);
+  context.save();
+  context.fillStyle = "#17212b";
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(point.x, point.y, 5.5, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("minimum", point.x + 8, point.y + 3);
+  context.restore();
+}
+
+function projectOptimizerPoint(
+  surface: LossSurfaceKey,
+  x: number,
+  y: number,
+  z: number,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  const bounds = optimizerSurfaceBounds(surface);
+  const nx = (x - (bounds.x[0] + bounds.x[1]) / 2) / (bounds.x[1] - bounds.x[0]);
+  const ny = (y - (bounds.y[0] + bounds.y[1]) / 2) / (bounds.y[1] - bounds.y[0]);
+  const zNorm = Math.min(1, Math.log1p(Math.max(0, z)) / Math.log1p(optimizerSurfaceMax(surface)));
+
+  return {
+    x: pane.x + pane.width * 0.5 + (nx - ny) * pane.width * 0.72,
+    y: pane.y + pane.height * 0.68 + (nx + ny) * pane.height * 0.34 - zNorm * pane.height * 0.5,
+  };
+}
+
+function optimizerSurfaceValue(surface: LossSurfaceKey, x: number, y: number) {
+  if (surface === "beale") {
+    return (1.5 - x + x * y) ** 2 + (2.25 - x + x * y ** 2) ** 2 + (2.625 - x + x * y ** 3) ** 2;
+  }
+
+  return (1 - x) ** 2 + 100 * (y - x ** 2) ** 2;
+}
+
+function optimizerSurfaceBounds(surface: LossSurfaceKey) {
+  if (surface === "beale") {
+    return { x: [-4.5, 4.5] as [number, number], y: [-4.5, 4.5] as [number, number] };
+  }
+
+  return { x: [-2.2, 2.2] as [number, number], y: [-1.2, 2.8] as [number, number] };
+}
+
+function optimizerSurfaceMax(surface: LossSurfaceKey) {
+  const bounds = optimizerSurfaceBounds(surface);
+  const sampleCount = 18;
+  let max = 1;
+  for (let row = 0; row <= sampleCount; row += 1) {
+    for (let column = 0; column <= sampleCount; column += 1) {
+      const x = bounds.x[0] + (column / sampleCount) * (bounds.x[1] - bounds.x[0]);
+      const y = bounds.y[0] + (row / sampleCount) * (bounds.y[1] - bounds.y[0]);
+      max = Math.max(max, optimizerSurfaceValue(surface, x, y));
+    }
+  }
+  return max;
+}
+
+function optimizerSurfaceLabel(surface: LossSurfaceKey) {
+  return surface === "beale" ? "Beale function" : "Rosenbrock banana";
+}
+
+function paintAdaptiveOptimizerPane(
+  context: CanvasRenderingContext2D,
+  optimizer: NonNullable<ConceptFrame["optimizer"]>,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Adam denominator sqrt(vhat)", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, "thicker red lines mean big gradients; compressed eta_i keeps the update stable", pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const graph = {
+    x: pane.x + 24,
+    y: pane.y + 70,
+    width: pane.width - 48,
+    height: pane.height - 112,
+  };
+  const positions = new Map<string, { x: number; y: number }>();
+  const layers = [
+    { ids: ["x1", "x2"], x: graph.x + 12 },
+    { ids: ["h1", "h2", "h3"], x: graph.x + graph.width * 0.52 },
+    { ids: ["y"], x: graph.x + graph.width - 12 },
+  ];
+
+  layers.forEach((layer) => {
+    layer.ids.forEach((id, index) => {
+      const y =
+        layer.ids.length === 1
+          ? graph.y + graph.height / 2
+          : graph.y + (index / (layer.ids.length - 1)) * graph.height;
+      positions.set(id, { x: layer.x, y });
+    });
+  });
+
+  const maxGradient = Math.max(0.01, ...optimizer.adaptiveWeights.map((weight) => weight.gradient));
+  const maxRate = Math.max(0.001, ...optimizer.adaptiveWeights.map((weight) => weight.adaptiveRate));
+  optimizer.adaptiveWeights.forEach((weight) => {
+    const from = positions.get(weight.from);
+    const to = positions.get(weight.to);
+    if (!from || !to) {
+      return;
+    }
+
+    const gradientRatio = weight.gradient / maxGradient;
+    const rateRatio = weight.adaptiveRate / maxRate;
+    context.save();
+    context.strokeStyle = adaptiveRateColor(rateRatio);
+    context.globalAlpha = 0.24 + gradientRatio * 0.62;
+    context.lineWidth = 1 + gradientRatio * 6;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+    context.restore();
+  });
+
+  positions.forEach((point, id) => {
+    context.beginPath();
+    context.fillStyle = "#ffffff";
+    context.strokeStyle = id.startsWith("x") ? "#2f6fbe" : id.startsWith("h") ? "#0f766e" : "#17212b";
+    context.lineWidth = 2.2;
+    context.arc(point.x, point.y, 13, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#17212b";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(id, point.x, point.y + 3);
+  });
+
+  const largest = [...optimizer.adaptiveWeights].sort((a, b) => b.gradient - a.gradient)[0];
+  if (largest) {
+    context.fillStyle = "#61707f";
+    context.font = "700 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(
+      `largest gradient ${largest.from}->${largest.to}: |g|=${largest.gradient.toFixed(3)}, sqrt(vhat)=${largest.denominator.toFixed(3)}, eta_i=${largest.adaptiveRate.toFixed(4)}`,
+      pane.x + 14,
+      pane.y + pane.height - 24,
+    );
+  }
+
+  context.restore();
+}
+
+function adaptiveRateColor(rateRatio: number) {
+  const clamped = Math.max(0, Math.min(1, rateRatio));
+  const compressed = { r: 211, g: 74, b: 67 };
+  const free = { r: 47, g: 111, b: 190 };
+  const r = Math.round(compressed.r + (free.r - compressed.r) * clamped);
+  const g = Math.round(compressed.g + (free.g - compressed.g) * clamped);
+  const b = Math.round(compressed.b + (free.b - compressed.b) * clamped);
+
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function paintBackpropLesson(

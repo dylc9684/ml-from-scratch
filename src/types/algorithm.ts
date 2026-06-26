@@ -17,6 +17,8 @@ export const algorithmCategories = [
   "Neural Networks",
   "Multi-Layer Networks",
   "Activation Functions — ReLU, Sigmoid, GELU",
+  "Loss Functions — MSE, Cross-Entropy, Contrastive",
+  "SGD, Momentum, Adam, AdamW",
   "Backpropagation from scratch",
 ] as const;
 
@@ -256,6 +258,85 @@ export type ActivationState = {
   recoveryCount: number;
 };
 
+export type LossFunctionKey = "mse" | "cross-entropy" | "contrastive";
+
+export type LossPrediction = {
+  label: string;
+  target: number;
+  prediction: number;
+};
+
+export type ContrastivePoint = {
+  id: string;
+  x: number;
+  y: number;
+  label: string;
+};
+
+export type ContrastivePair = {
+  id: string;
+  from: ContrastivePoint;
+  to: ContrastivePoint;
+  relation: "similar" | "different";
+  distance: number;
+  loss: number;
+  gradientMagnitude: number;
+};
+
+export type LossState = {
+  selected: LossFunctionKey;
+  epoch: number;
+  learningRate: number;
+  margin: number;
+  lossHistory: DataPoint[];
+  currentLoss: number;
+  status: "converging" | "diverging" | "oscillating";
+  predictions: LossPrediction[];
+  contrastivePairs: ContrastivePair[];
+};
+
+export type OptimizerKey = "sgd" | "momentum" | "adam" | "adamw";
+
+export type LossSurfaceKey = "rosenbrock" | "beale";
+
+export type OptimizerTracePoint = {
+  step: number;
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type OptimizerRunnerState = {
+  id: OptimizerKey;
+  label: string;
+  color: string;
+  history: OptimizerTracePoint[];
+  position: OptimizerTracePoint;
+};
+
+export type AdaptiveWeightState = {
+  from: string;
+  to: string;
+  gradient: number;
+  denominator: number;
+  adaptiveRate: number;
+};
+
+export type OptimizerState = {
+  surface: LossSurfaceKey;
+  step: number;
+  learningRate: number;
+  beta1: number;
+  beta2: number;
+  weightDecay: number;
+  start: {
+    x: number;
+    y: number;
+  };
+  runners: OptimizerRunnerState[];
+  adaptiveWeights: AdaptiveWeightState[];
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -267,6 +348,8 @@ export type ConceptFrame = {
   heatmap?: HeatmapCell[];
   backprop?: BackpropState;
   activation?: ActivationState;
+  loss?: LossState;
+  optimizer?: OptimizerState;
   summary: string;
 };
 
