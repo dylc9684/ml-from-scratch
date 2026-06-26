@@ -1,6 +1,7 @@
 import type {
   AlgorithmCategory,
   AlgorithmDefinition,
+  BackpropFormulaValue,
   ConceptBar,
   ConceptFrame,
   ConceptSeries,
@@ -973,6 +974,667 @@ history = model.fit(X, y, epochs=${Math.round(numberParam(params, "epochs", 100)
 await model.fit(xs, ys, { epochs: ${Math.round(numberParam(params, "epochs", 100))} });`,
 });
 
+const multiLayerNetwork = makeConceptAlgorithm({
+  id: "multi-layer-network",
+  name: "MLP Topology",
+  category: "Multi-Layer Networks",
+  summary: "Visualizes hidden-layer neurons, weight matrices, and nonlinear decision boundaries.",
+  parameters: [
+    { kind: "range", id: "hiddenLayers", label: "Hidden layers", min: 1, max: 4, step: 1, defaultValue: 2, format: "integer" },
+    { kind: "stepper", id: "hiddenNeurons", label: "Hidden neurons", min: 2, max: 16, step: 1, defaultValue: 6, format: "integer" },
+    { kind: "range", id: "trainingSteps", label: "Training steps", min: 20, max: 240, step: 10, defaultValue: 120, format: "integer" },
+    { kind: "range", id: "weightScale", label: "Weight scale", min: 0.4, max: 2.4, step: 0.1, defaultValue: 1.2, format: "decimal" },
+    {
+      kind: "select",
+      id: "datasetKind",
+      label: "Dataset",
+      defaultValue: "xor",
+      options: [
+        { label: "XOR grid", value: "xor" },
+        { label: "Concentric circles", value: "circles" },
+        { label: "Linear blobs", value: "linear" },
+      ],
+    },
+    {
+      kind: "select",
+      id: "activation",
+      label: "Activation",
+      defaultValue: "tanh",
+      options: [
+        { label: "Tanh", value: "tanh" },
+        { label: "ReLU", value: "relu" },
+        { label: "Sigmoid", value: "sigmoid" },
+      ],
+    },
+  ],
+  sample: () => makeNetworkLessonDataset("xor"),
+  formulas: [
+    { title: "Layer transform", expression: "h^{(l)}=\\phi(W^{(l)}h^{(l-1)}+b^{(l)})" },
+    { title: "Matrix shape", expression: "W^{(l)}\\in\\mathbb{R}^{d_{l-1}\\times d_l}" },
+    { title: "Decision boundary", expression: "\\{x:p(y=1\\mid x)=0.5\\}" },
+  ],
+  explanation: [
+    "This lesson links the algebra to the picture: circles are neurons, lines are weights, and each dense layer applies a matrix multiply followed by a nonlinearity.",
+    "Use the hidden-neuron buttons to append or remove neurons. The architecture graph updates immediately, and the code tabs show the corresponding matrix shapes.",
+    "On XOR or concentric-circle data, the heat map starts close to a straight boundary and becomes curved as hidden layers add nonlinear feature composition.",
+  ],
+  engine: (_, params) => {
+    const hiddenLayers = Math.round(numberParam(params, "hiddenLayers", 3));
+    const hiddenNeurons = Math.round(numberParam(params, "hiddenNeurons", 6));
+    const trainingSteps = Math.round(numberParam(params, "trainingSteps", 120));
+    const weightScale = numberParam(params, "weightScale", 1.2);
+    const datasetKind = stringParam(params, "datasetKind", "xor");
+    const activation = stringParam(params, "activation", "relu");
+    const dataset = makeNetworkLessonDataset(datasetKind);
+    const layerUnits = [
+      { label: "input", units: 2 },
+      ...Array.from({ length: hiddenLayers }, (_, index) => ({
+        label: `hidden ${index + 1}`,
+        units: hiddenNeurons,
+      })),
+      { label: "output", units: 1 },
+    ];
+    const totalParameters = countNetworkParameters(layerUnits.map((layer) => layer.units));
+    const frameCount = 34;
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const progress = index / (frameCount - 1);
+      return {
+        type: "concept-demo" as const,
+        iteration: Math.round(progress * trainingSteps),
+        points: dataset.points,
+        heatmap: makeDecisionHeatmap(datasetKind, hiddenLayers, hiddenNeurons, progress),
+        network: makeNetworkGraph(layerUnits, progress, weightScale, activation, datasetKind),
+        summary: `${hiddenLayers} hidden layer${hiddenLayers === 1 ? "" : "s"} · ${hiddenNeurons} neurons/layer · ${matrixShapeSummary(layerUnits.map((layer) => layer.units))}`,
+      };
+    });
+    const finalAccuracy = estimateBoundaryAccuracy(dataset.points, datasetKind, hiddenLayers, hiddenNeurons, 1);
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Accuracy", value: metricValue(finalAccuracy) },
+        { label: "Parameters", value: totalParameters.toLocaleString() },
+        { label: "Matrix shapes", value: matrixShapeSummary(layerUnits.map((layer) => layer.units)) },
+        { label: "Dataset", value: datasetKind },
+      ],
+    };
+  },
+  python: (params) => {
+    const hiddenLayers = Math.round(numberParam(params, "hiddenLayers", 3));
+    const hiddenNeurons = Math.round(numberParam(params, "hiddenNeurons", 6));
+    const activation = stringParam(params, "activation", "tanh");
+    const layerSizes = [2, ...Array.from({ length: hiddenLayers }, () => hiddenNeurons), 1];
+
+    return `import numpy as np
+
+layer_sizes = ${JSON.stringify(layerSizes)}
+weights = [
+    np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * 0.4
+    for i in range(len(layer_sizes) - 1)
+]
+biases = [np.zeros((1, width)) for width in layer_sizes[1:]]
+
+def activate(z):
+    return ${activation === "relu" ? "np.maximum(0, z)" : activation === "sigmoid" ? "1 / (1 + np.exp(-z))" : "np.tanh(z)"}
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def forward(X):
+    a = X
+    activations = [a]
+    for W, b in zip(weights[:-1], biases[:-1]):
+        z = a @ W + b
+        a = activate(z)
+        activations.append(a)
+
+    logits = a @ weights[-1] + biases[-1]
+    return sigmoid(logits), activations
+
+probabilities, hidden_states = forward(X)`;
+  },
+  javascript: (params) => {
+    const hiddenLayers = Math.round(numberParam(params, "hiddenLayers", 3));
+    const hiddenNeurons = Math.round(numberParam(params, "hiddenNeurons", 6));
+    const activation = stringParam(params, "activation", "tanh");
+    const layerSizes = [2, ...Array.from({ length: hiddenLayers }, () => hiddenNeurons), 1];
+
+    return `const layerSizes = ${JSON.stringify(layerSizes)};
+const weights = layerSizes.slice(0, -1).map((width, index) =>
+  randomMatrix(width, layerSizes[index + 1], 0.4),
+);
+const biases = layerSizes.slice(1).map((width) => [new Array(width).fill(0)]);
+
+function matMul(a, b) {
+  return a.map((row) =>
+    b[0].map((_, column) =>
+      row.reduce((sum, value, index) => sum + value * b[index][column], 0),
+    ),
+  );
+}
+
+function activate(value) {
+  if ("${activation}" === "relu") return Math.max(0, value);
+  if ("${activation}" === "sigmoid") return 1 / (1 + Math.exp(-value));
+  return Math.tanh(value);
+}
+
+function forward(batch) {
+  let a = batch;
+  for (let layer = 0; layer < weights.length - 1; layer += 1) {
+    a = addBias(matMul(a, weights[layer]), biases[layer])
+      .map((row) => row.map(activate));
+  }
+  return addBias(matMul(a, weights.at(-1)), biases.at(-1))
+    .map((row) => row.map((logit) => 1 / (1 + Math.exp(-logit))));
+}`;
+  },
+});
+
+const backpropagationFromScratch = makeConceptAlgorithm({
+  id: "backpropagation-from-scratch",
+  name: "Backpropagation from Scratch",
+  category: "Backpropagation from scratch",
+  summary: "Steps through a manual forward pass, chain-rule deltas, and weight gradients.",
+  parameters: [
+    {
+      kind: "action",
+      id: "stepIndex",
+      label: "Sample step",
+      buttonLabel: "Step",
+      min: 0,
+      max: 999,
+      step: 1,
+      defaultValue: 0,
+      format: "integer",
+    },
+    {
+      kind: "range",
+      id: "learningRate",
+      label: "Learning rate",
+      min: 0.05,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0.35,
+      format: "decimal",
+    },
+  ],
+  sample: makeBackpropDataset,
+  formulas: [
+    { title: "Forward pass", expression: "a^{[l]}=\\sigma(a^{[l-1]}W^{[l]}+b^{[l]})" },
+    { title: "Output delta", expression: "\\delta^{[2]}=(a^{[2]}-y)\\odot a^{[2]}(1-a^{[2]})" },
+    { title: "Hidden delta", expression: "\\delta^{[1]}=(\\delta^{[2]}W^{[2]T})\\odot a^{[1]}(1-a^{[1]})" },
+    { title: "Weight gradient", expression: "\\frac{\\partial L}{\\partial W^{[l]}}=a^{[l-1]T}\\delta^{[l]}" },
+  ],
+  explanation: [
+    "Backpropagation applies the chain rule from the output layer back toward the inputs.",
+    "The blue pulse is the forward pass that creates activations. The red pulse is the backward pass that sends error signals through the same weights.",
+    "Line brightness represents the current gradient magnitude, so a brighter edge would receive a larger update for this sample.",
+  ],
+  engine: (_, params) => {
+    const stepIndex = Math.round(numberParam(params, "stepIndex", 0));
+    const learningRate = numberParam(params, "learningRate", 0.35);
+    const samples = backpropSamples();
+    const sample = samples[((stepIndex % samples.length) + samples.length) % samples.length];
+    const state = computeBackpropStep(sample.x, sample.y);
+    const frameCount = 30;
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const switchFrame = 13;
+      const phase: "forward" | "backward" = index <= switchFrame ? "forward" : "backward";
+      const progress =
+        phase === "forward"
+          ? index / switchFrame
+          : (index - switchFrame - 1) / Math.max(1, frameCount - switchFrame - 2);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: makeBackpropDataset().points,
+        network: makeBackpropGraph(state, phase, learningRate),
+        backprop: {
+          pulse: {
+            phase,
+            progress: Math.max(0, Math.min(1, progress)),
+          },
+          sample,
+          prediction: state.a2,
+          loss: state.loss,
+          deltas: {
+            output: state.delta2,
+            hidden: [state.delta1[0], state.delta1[1]] as [number, number],
+          },
+          formulas: makeBackpropFormulaValues(state),
+        },
+        summary: `${phase === "forward" ? "Forward pass" : "Backward pass"} · x=[${sample.x.join(", ")}] · y=${sample.y} · yhat=${state.a2.toFixed(3)} · loss=${state.loss.toFixed(4)}`,
+      };
+    });
+    const gradients = [
+      ...state.dW1.flat(),
+      ...state.dW2,
+      state.db2,
+      ...state.db1,
+    ].map(Math.abs);
+    const largestGradient = Math.max(...gradients);
+    const w2Preview = backpropWeights.w2[0] - learningRate * state.dW2[0];
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Prediction", value: state.a2.toFixed(4) },
+        { label: "Loss", value: state.loss.toFixed(5) },
+        { label: "Largest gradient", value: largestGradient.toFixed(5) },
+        { label: "W2[0] after lr", value: w2Preview.toFixed(4) },
+      ],
+    };
+  },
+  python: (params) => `import numpy as np
+
+learning_rate = ${numberParam(params, "learningRate", 0.35)}
+X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=float)
+y = np.array([[0], [1], [1], [0]], dtype=float)
+
+W1 = np.array([[0.60, -0.40], [0.20, 0.80]])
+b1 = np.array([[0.05, -0.10]])
+W2 = np.array([[0.70], [-0.50]])
+b2 = np.array([[0.03]])
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def backward_pass(X, y):
+    z1 = X.dot(W1) + b1
+    a1 = sigmoid(z1)
+    z2 = a1.dot(W2) + b2
+    a2 = sigmoid(z2)
+
+    delta2 = (a2 - y) * a2 * (1 - a2)
+    dW2 = a1.T.dot(delta2)
+    db2 = np.sum(delta2, axis=0, keepdims=True)
+
+    delta1 = delta2.dot(W2.T) * a1 * (1 - a1)
+    dW1 = X.T.dot(delta1)
+    db1 = np.sum(delta1, axis=0, keepdims=True)
+
+    return dW1, db1, dW2, db2
+
+dW1, db1, dW2, db2 = backward_pass(X, y)
+W1 -= learning_rate * dW1
+W2 -= learning_rate * dW2`,
+  javascript: (params) => `const learningRate = ${numberParam(params, "learningRate", 0.35)};
+const X = [[0, 0], [0, 1], [1, 0], [1, 1]];
+const y = [[0], [1], [1], [0]];
+
+let W1 = [[0.60, -0.40], [0.20, 0.80]];
+let b1 = [[0.05, -0.10]];
+let W2 = [[0.70], [-0.50]];
+let b2 = [[0.03]];
+
+const sigmoid = (value) => 1 / (1 + Math.exp(-value));
+const transpose = (matrix) => matrix[0].map((_, column) => matrix.map((row) => row[column]));
+const matMul = (a, b) => a.map((row) =>
+  b[0].map((_, column) =>
+    row.reduce((sum, value, index) => sum + value * b[index][column], 0),
+  ),
+);
+const addBias = (matrix, bias) => matrix.map((row) => row.map((value, i) => value + bias[0][i]));
+const mapMatrix = (matrix, fn) => matrix.map((row) => row.map(fn));
+const hadamard = (a, b) => a.map((row, r) => row.map((value, c) => value * b[r][c]));
+
+function backwardPass(batch, labels) {
+  const z1 = addBias(matMul(batch, W1), b1);
+  const a1 = mapMatrix(z1, sigmoid);
+  const z2 = addBias(matMul(a1, W2), b2);
+  const a2 = mapMatrix(z2, sigmoid);
+
+  const error = a2.map((row, r) => row.map((value, c) => value - labels[r][c]));
+  const sigmoidPrime2 = a2.map((row) => row.map((value) => value * (1 - value)));
+  const delta2 = hadamard(error, sigmoidPrime2);
+  const dW2 = matMul(transpose(a1), delta2);
+
+  const sigmoidPrime1 = a1.map((row) => row.map((value) => value * (1 - value)));
+  const delta1 = hadamard(matMul(delta2, transpose(W2)), sigmoidPrime1);
+  const dW1 = matMul(transpose(batch), delta1);
+
+  return { dW1, dW2, delta1, delta2 };
+}
+
+const gradients = backwardPass(X, y);
+W1 = W1.map((row, r) => row.map((w, c) => w - learningRate * gradients.dW1[r][c]));
+W2 = W2.map((row, r) => row.map((w, c) => w - learningRate * gradients.dW2[r][c]));`,
+});
+
+type BackpropSample = {
+  x: [number, number];
+  y: number;
+};
+
+type BackpropStep = {
+  z1: [number, number];
+  a1: [number, number];
+  z2: number;
+  a2: number;
+  loss: number;
+  delta2: number;
+  delta1: [number, number];
+  dW1: [[number, number], [number, number]];
+  dW2: [number, number];
+  db1: [number, number];
+  db2: number;
+};
+
+const backpropWeights = {
+  w1: [
+    [0.6, -0.4],
+    [0.2, 0.8],
+  ],
+  b1: [0.05, -0.1],
+  w2: [0.7, -0.5],
+  b2: 0.03,
+};
+
+function backpropSamples(): BackpropSample[] {
+  return [
+    { x: [0, 0], y: 0 },
+    { x: [0, 1], y: 1 },
+    { x: [1, 0], y: 1 },
+    { x: [1, 1], y: 0 },
+  ];
+}
+
+function makeBackpropDataset() {
+  return makeDataset(
+    "Generated XOR backprop samples",
+    backpropSamples().map((sample) => ({
+      x: sample.x[0],
+      y: sample.x[1],
+      label: sample.y === 1 ? "positive" : "negative",
+    })),
+  );
+}
+
+function computeBackpropStep(x: [number, number], y: number): BackpropStep {
+  const z1: [number, number] = [
+    x[0] * backpropWeights.w1[0][0] + x[1] * backpropWeights.w1[1][0] + backpropWeights.b1[0],
+    x[0] * backpropWeights.w1[0][1] + x[1] * backpropWeights.w1[1][1] + backpropWeights.b1[1],
+  ];
+  const a1: [number, number] = [sigmoid(z1[0]), sigmoid(z1[1])];
+  const z2 = a1[0] * backpropWeights.w2[0] + a1[1] * backpropWeights.w2[1] + backpropWeights.b2;
+  const a2 = sigmoid(z2);
+  const loss = 0.5 * (a2 - y) ** 2;
+  const delta2 = (a2 - y) * a2 * (1 - a2);
+  const dW2: [number, number] = [a1[0] * delta2, a1[1] * delta2];
+  const delta1: [number, number] = [
+    delta2 * backpropWeights.w2[0] * a1[0] * (1 - a1[0]),
+    delta2 * backpropWeights.w2[1] * a1[1] * (1 - a1[1]),
+  ];
+  const dW1: [[number, number], [number, number]] = [
+    [x[0] * delta1[0], x[0] * delta1[1]],
+    [x[1] * delta1[0], x[1] * delta1[1]],
+  ];
+
+  return {
+    z1,
+    a1,
+    z2,
+    a2,
+    loss,
+    delta2,
+    delta1,
+    dW1,
+    dW2,
+    db1: delta1,
+    db2: delta2,
+  };
+}
+
+function makeBackpropGraph(
+  state: BackpropStep,
+  phase: "forward" | "backward",
+  learningRate: number,
+) {
+  const gradientScale = phase === "backward" ? 90 * Math.max(0.1, learningRate) : 1;
+  const edgeValue = (weight: number, gradient: number) =>
+    phase === "forward" ? weight : gradient * gradientScale;
+  const layers = [
+    { label: "input", units: 2 },
+    { label: "hidden", units: 2 },
+    { label: "output", units: 1 },
+  ];
+  const nodes = [
+    { id: "bp-i0", layer: 0, index: 0, label: "x1" },
+    { id: "bp-i1", layer: 0, index: 1, label: "x2" },
+    { id: "bp-h0", layer: 1, index: 0, label: "h1" },
+    { id: "bp-h1", layer: 1, index: 1, label: "h2" },
+    { id: "bp-o0", layer: 2, index: 0, label: "yhat" },
+  ];
+  const weights = [
+    { from: "bp-i0", to: "bp-h0", value: edgeValue(backpropWeights.w1[0][0], state.dW1[0][0]) },
+    { from: "bp-i0", to: "bp-h1", value: edgeValue(backpropWeights.w1[0][1], state.dW1[0][1]) },
+    { from: "bp-i1", to: "bp-h0", value: edgeValue(backpropWeights.w1[1][0], state.dW1[1][0]) },
+    { from: "bp-i1", to: "bp-h1", value: edgeValue(backpropWeights.w1[1][1], state.dW1[1][1]) },
+    { from: "bp-h0", to: "bp-o0", value: edgeValue(backpropWeights.w2[0], state.dW2[0]) },
+    { from: "bp-h1", to: "bp-o0", value: edgeValue(backpropWeights.w2[1], state.dW2[1]) },
+  ];
+
+  return {
+    layers,
+    nodes,
+    weights,
+  };
+}
+
+function makeBackpropFormulaValues(state: BackpropStep): BackpropFormulaValue[] {
+  return [
+    {
+      title: "Forward activation",
+      expression: "\\displaystyle a^{[2]}=\\sigma(a^{[1]}W^{[2]}+b^{[2]})",
+      substitution: `a^{[2]} = sigma(${bpNumber(state.a1[0])}*0.70 + ${bpNumber(state.a1[1])}*(-0.50) + 0.03)`,
+      value: `a^{[2]} = ${bpNumber(state.a2)}`,
+    },
+    {
+      title: "Output delta",
+      expression: "\\displaystyle \\delta^{[2]}=(a^{[2]}-y)a^{[2]}(1-a^{[2]})",
+      substitution: `delta^{[2]} = (${bpNumber(state.a2)} - y) * ${bpNumber(state.a2)} * (1 - ${bpNumber(state.a2)})`,
+      value: `delta^{[2]} = ${bpNumber(state.delta2)}`,
+    },
+    {
+      title: "Hidden delta",
+      expression: "\\displaystyle \\delta^{[1]}=(\\delta^{[2]}W^{[2]T})\\odot a^{[1]}(1-a^{[1]})",
+      substitution: `delta^{[1]} = ${bpNumber(state.delta2)} * [0.70, -0.50] .* [${bpNumber(state.a1[0])}, ${bpNumber(state.a1[1])}] .* (1-a^{[1]})`,
+      value: `delta^{[1]} = [${bpNumber(state.delta1[0])}, ${bpNumber(state.delta1[1])}]`,
+    },
+    {
+      title: "Weight gradients",
+      expression: "\\displaystyle \\frac{\\partial L}{\\partial W^{[l]}}=a^{[l-1]T}\\delta^{[l]}",
+      substitution: `dW2 = [${bpNumber(state.a1[0])}, ${bpNumber(state.a1[1])}]^T * ${bpNumber(state.delta2)}`,
+      value: `dW2 = [${bpNumber(state.dW2[0])}, ${bpNumber(state.dW2[1])}]`,
+    },
+  ];
+}
+
+function bpNumber(value: number) {
+  return value.toFixed(4);
+}
+
+function makeNetworkLessonDataset(kind: string): NormalizedDataset {
+  if (kind === "circles") {
+    const points = Array.from({ length: 84 }, (_, index) => {
+      const inner = index % 3 === 0;
+      const angle = index * 1.41;
+      const radius = inner
+        ? 0.75 + ((index * 11) % 9) * 0.035
+        : 2.05 + ((index * 17) % 13) * 0.045;
+      return {
+        x: round(Math.cos(angle) * radius),
+        y: round(Math.sin(angle) * radius),
+        label: inner ? "positive" : "negative",
+      };
+    });
+
+    return makeDataset("Generated concentric circles sample", points);
+  }
+
+  if (kind === "linear") {
+    const points = Array.from({ length: 76 }, (_, index) => {
+      const positive = index % 2 === 0;
+      const angle = index * 1.27;
+      const center = positive ? 1.25 : -1.25;
+      return {
+        x: round(center + Math.cos(angle) * 0.75),
+        y: round(center + Math.sin(angle * 1.1) * 0.75),
+        label: positive ? "positive" : "negative",
+      };
+    });
+
+    return makeDataset("Generated linear blobs sample", points);
+  }
+
+  const points = Array.from({ length: 88 }, (_, index) => {
+    const x = -2.8 + (((index * 37) % 100) / 99) * 5.6;
+    const y = -2.8 + (((index * 61 + 19) % 100) / 99) * 5.6;
+    const adjustedX = Math.abs(x) < 0.22 ? x + 0.32 * Math.sign(x || 1) : x;
+    const adjustedY = Math.abs(y) < 0.22 ? y + 0.32 * Math.sign(y || 1) : y;
+
+    return {
+      x: round(adjustedX),
+      y: round(adjustedY),
+      label: adjustedX * adjustedY < 0 ? "positive" : "negative",
+    };
+  });
+
+  return makeDataset("Generated XOR grid sample", points);
+}
+
+function makeDecisionHeatmap(
+  kind: string,
+  hiddenLayers: number,
+  hiddenNeurons: number,
+  progress: number,
+) {
+  const gridSize = 34;
+  const cells = [];
+
+  for (let row = 0; row < gridSize; row += 1) {
+    for (let column = 0; column < gridSize; column += 1) {
+      const x = -3 + (column / (gridSize - 1)) * 6;
+      const y = -3 + (row / (gridSize - 1)) * 6;
+      cells.push({
+        x,
+        y,
+        value: networkLessonScore(x, y, kind, hiddenLayers, hiddenNeurons, progress),
+      });
+    }
+  }
+
+  return cells;
+}
+
+function networkLessonScore(
+  x: number,
+  y: number,
+  kind: string,
+  hiddenLayers: number,
+  hiddenNeurons: number,
+  progress: number,
+) {
+  const capacity = Math.min(1, hiddenNeurons / 10);
+  const depthBlend = Math.min(1, Math.max(0, hiddenLayers - 1) / 2);
+  const learned = progress * (0.35 + capacity * 0.65);
+  const nonlinearBlend = Math.min(1, depthBlend * learned);
+  const linearScore = sigmoid((x + y) * 1.15);
+  let nonlinearScore = linearScore;
+
+  if (kind === "circles") {
+    nonlinearScore = sigmoid((1.85 - (x ** 2 + y ** 2)) * 2.2);
+  } else if (kind === "xor") {
+    nonlinearScore = sigmoid((-x * y) * 2.2);
+  }
+
+  return linearScore * (1 - nonlinearBlend) + nonlinearScore * nonlinearBlend;
+}
+
+function estimateBoundaryAccuracy(
+  points: DataPoint[],
+  kind: string,
+  hiddenLayers: number,
+  hiddenNeurons: number,
+  progress: number,
+) {
+  const correct = points.filter((point) => {
+    const prediction =
+      networkLessonScore(point.x, point.y, kind, hiddenLayers, hiddenNeurons, progress) >= 0.5
+        ? 1
+        : 0;
+    return prediction === classValue(point);
+  }).length;
+
+  return correct / points.length;
+}
+
+function makeNetworkGraph(
+  layers: Array<{ label: string; units: number }>,
+  progress: number,
+  weightScale: number,
+  activation: string,
+  datasetKind: string,
+) {
+  const nodes = layers.flatMap((layer, layerIndex) =>
+    Array.from({ length: layer.units }, (_, nodeIndex) => ({
+      id: `l${layerIndex}n${nodeIndex}`,
+      layer: layerIndex,
+      index: nodeIndex,
+      label: `${layer.label} ${nodeIndex + 1}`,
+    })),
+  );
+  const activationFactor = activation === "relu" ? 1.15 : activation === "sigmoid" ? 0.75 : 1;
+  const datasetOffset = datasetKind === "circles" ? 1.7 : datasetKind === "linear" ? 0.6 : 2.8;
+  const weights: Array<{ from: string; to: string; value: number }> = [];
+
+  for (let layerIndex = 0; layerIndex < layers.length - 1; layerIndex += 1) {
+    const fromNodes = nodes.filter((node) => node.layer === layerIndex);
+    const toNodes = nodes.filter((node) => node.layer === layerIndex + 1);
+
+    fromNodes.forEach((from) => {
+      toNodes.forEach((to) => {
+        const wave =
+          Math.sin(
+            datasetOffset +
+              (layerIndex + 1) * 1.73 +
+              from.index * 0.61 -
+              to.index * 0.47 +
+              progress * 3.2,
+          ) * Math.cos((from.index + 1) * (to.index + 1) * 0.09 + progress);
+        weights.push({
+          from: from.id,
+          to: to.id,
+          value: wave * weightScale * activationFactor * (0.2 + progress * 0.8),
+        });
+      });
+    });
+  }
+
+  return {
+    layers,
+    nodes,
+    weights,
+  };
+}
+
+function matrixShapeSummary(layerSizes: number[]) {
+  return layerSizes
+    .slice(0, -1)
+    .map((size, index) => `${size}x${layerSizes[index + 1]}`)
+    .join(" -> ");
+}
+
+function countNetworkParameters(layerSizes: number[]) {
+  return layerSizes
+    .slice(1)
+    .reduce((total, size, index) => total + (layerSizes[index] + 1) * size, 0);
+}
+
 type ConceptConfig = {
   id: string;
   name: string;
@@ -1133,4 +1795,6 @@ export const categoryDemos: AlgorithmDefinition[] = [
   imbalancedData,
   timeSeries,
   neuralNetwork,
+  multiLayerNetwork,
+  backpropagationFromScratch,
 ];

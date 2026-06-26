@@ -123,4 +123,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Handling Imbalanced Data": "Sampling, class weights, and threshold tradeoffs.",
   "Time Series Fundamentals": "Trend, seasonality, lag features, and forecasting.",
   "Neural Networks": "Layered differentiable models trained by backpropagation.",
+  "Multi-Layer Networks": "Deep feed-forward topologies with stacked hidden layers.",
+  "Backpropagation from scratch":
+    "Forward activations, backward deltas, and gradient updates by hand.",
 };

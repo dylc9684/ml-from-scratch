@@ -1,3 +1,4 @@
+import { Minus, Plus } from "lucide-react";
 import type {
   AlgorithmDefinition,
   ParameterDefinition,
@@ -97,6 +98,67 @@ function Control({
           ))}
         </select>
       </label>
+    );
+  }
+
+  if (parameter.kind === "stepper") {
+    const numericValue = Number(value ?? parameter.defaultValue);
+    const nextDown = Math.max(parameter.min, numericValue - parameter.step);
+    const nextUp = Math.min(parameter.max, numericValue + parameter.step);
+
+    return (
+      <div className="control-card stepper-control">
+        <div>
+          <span className="control-label">
+            <strong>{parameter.label}</strong>
+            <span>{formatValue(numericValue, parameter.format)}</span>
+          </span>
+        </div>
+        <div className="stepper-actions" aria-label={`${parameter.label} controls`}>
+          <button
+            className="stepper-button"
+            type="button"
+            aria-label={`Decrease ${parameter.label}`}
+            disabled={numericValue <= parameter.min}
+            onClick={() => onChange(nextDown)}
+          >
+            <Minus size={16} aria-hidden="true" />
+          </button>
+          <button
+            className="stepper-button"
+            type="button"
+            aria-label={`Increase ${parameter.label}`}
+            disabled={numericValue >= parameter.max}
+            onClick={() => onChange(nextUp)}
+          >
+            <Plus size={16} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (parameter.kind === "action") {
+    const numericValue = Number(value ?? parameter.defaultValue);
+    const nextValue =
+      numericValue >= parameter.max
+        ? parameter.min
+        : Math.min(parameter.max, numericValue + parameter.step);
+
+    return (
+      <div className="control-card action-control">
+        <span className="control-label">
+          <strong>{parameter.label}</strong>
+          <span>{formatValue(numericValue, parameter.format)}</span>
+        </span>
+        <button
+          className="button primary action-button"
+          type="button"
+          onClick={() => onChange(nextValue)}
+        >
+          {parameter.buttonLabel}
+        </button>
+      </div>
     );
   }
 

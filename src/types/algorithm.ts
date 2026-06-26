@@ -15,6 +15,8 @@ export const algorithmCategories = [
   "Handling Imbalanced Data",
   "Time Series Fundamentals",
   "Neural Networks",
+  "Multi-Layer Networks",
+  "Backpropagation from scratch",
 ] as const;
 
 export type AlgorithmCategory = (typeof algorithmCategories)[number];
@@ -27,6 +29,29 @@ export type NumericParameter = {
   kind: "range";
   id: string;
   label: string;
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  format?: "integer" | "decimal" | "percent";
+};
+
+export type StepperParameter = {
+  kind: "stepper";
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  format?: "integer" | "decimal" | "percent";
+};
+
+export type ActionParameter = {
+  kind: "action";
+  id: string;
+  label: string;
+  buttonLabel: string;
   min: number;
   max: number;
   step: number;
@@ -51,6 +76,8 @@ export type ToggleParameter = {
 
 export type ParameterDefinition =
   | NumericParameter
+  | StepperParameter
+  | ActionParameter
   | SelectParameter
   | ToggleParameter;
 
@@ -135,6 +162,63 @@ export type ConceptBar = {
   color?: string;
 };
 
+export type NetworkNode = {
+  id: string;
+  layer: number;
+  index: number;
+  label?: string;
+};
+
+export type NetworkWeight = {
+  from: string;
+  to: string;
+  value: number;
+};
+
+export type NetworkLayer = {
+  label: string;
+  units: number;
+};
+
+export type NetworkGraph = {
+  layers: NetworkLayer[];
+  nodes: NetworkNode[];
+  weights: NetworkWeight[];
+};
+
+export type HeatmapCell = {
+  x: number;
+  y: number;
+  value: number;
+};
+
+export type BackpropFormulaValue = {
+  title: string;
+  expression: string;
+  substitution: string;
+  value: string;
+};
+
+export type BackpropPulse = {
+  phase: "forward" | "backward";
+  progress: number;
+};
+
+export type BackpropState = {
+  pulse: BackpropPulse;
+  sample: {
+    x: [number, number];
+    y: number;
+  };
+  prediction: number;
+  loss: number;
+  deltas: {
+    output: number;
+    hidden: [number, number];
+  };
+  formulas: BackpropFormulaValue[];
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -142,6 +226,9 @@ export type ConceptFrame = {
   series?: ConceptSeries[];
   markers?: ConceptMarker[];
   bars?: ConceptBar[];
+  network?: NetworkGraph;
+  heatmap?: HeatmapCell[];
+  backprop?: BackpropState;
   summary: string;
 };
 
