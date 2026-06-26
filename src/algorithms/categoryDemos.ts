@@ -8,10 +8,12 @@ import type {
   ConceptBar,
   ConceptFrame,
   ConceptSeries,
+  ConvexOptimizerKey,
   ContrastivePair,
   ContrastivePoint,
   DataPoint,
   EngineResult,
+  ImageMatrixParameterValue,
   LossFunctionKey,
   LossSurfaceKey,
   LossPrediction,
@@ -30,6 +32,38 @@ const numberParam = (params: ParameterState, key: string, fallback: number) => {
 
 const stringParam = (params: ParameterState, key: string, fallback: string) =>
   typeof params[key] === "string" ? String(params[key]) : fallback;
+
+function matrixParam(params: ParameterState, key: string, fallback: number[][]) {
+  const value = params[key];
+  const source = Array.isArray(value) ? value : fallback;
+
+  return fallback.map((fallbackRow, rowIndex) => {
+    const row = Array.isArray(source[rowIndex]) ? source[rowIndex] : fallbackRow;
+    return fallbackRow.map((fallbackCell, columnIndex) => {
+      const cell = Number(row[columnIndex]);
+      return Number.isFinite(cell) ? Math.max(0, cell) : fallbackCell;
+    });
+  });
+}
+
+function imageMatrixParam(
+  params: ParameterState,
+  key: string,
+  fallback: ImageMatrixParameterValue,
+) {
+  const value = params[key];
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    value.kind === "image-matrix"
+  ) {
+    return value;
+  }
+
+  return fallback;
+}
 
 function makeDataset(name: string, points: DataPoint[]): NormalizedDataset {
   return {
@@ -911,6 +945,1165 @@ const horizon = ${Math.round(numberParam(params, "horizon", 7))};
 const movingAverage = rollingMean(series, windowSize);
 const forecast = extrapolate(movingAverage, horizon);`,
 });
+
+const stochasticStates = [
+  { id: "word-a", label: "Word A", color: "#2f6fbe" },
+  { id: "word-b", label: "Word B", color: "#0f766e" },
+  { id: "word-c", label: "Word C", color: "#d34a43" },
+];
+
+const defaultTransitionMatrix = [
+  [0.12, 0.68, 0.2],
+  [0.34, 0.16, 0.5],
+  [0.52, 0.28, 0.2],
+];
+
+const stochasticProcesses = makeConceptAlgorithm({
+  id: "stochastic-processes",
+  name: "Stochastic Processes",
+  category: "Stochastic Processes",
+  summary: "Animates random-walk trajectories and Markov transition sampling.",
+  parameters: [
+    {
+      kind: "range",
+      id: "drift",
+      label: "Drift mu",
+      min: -0.08,
+      max: 0.08,
+      step: 0.005,
+      defaultValue: 0.015,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "volatility",
+      label: "Volatility sigma",
+      min: 0.05,
+      max: 0.65,
+      step: 0.01,
+      defaultValue: 0.22,
+      format: "decimal",
+    },
+    {
+      kind: "stepper",
+      id: "pathCount",
+      label: "Particle paths",
+      min: 12,
+      max: 48,
+      step: 4,
+      defaultValue: 28,
+      format: "integer",
+    },
+    {
+      kind: "range",
+      id: "timeSteps",
+      label: "Timeline steps",
+      min: 24,
+      max: 120,
+      step: 4,
+      defaultValue: 72,
+      format: "integer",
+    },
+    {
+      kind: "matrix",
+      id: "transitionMatrix",
+      label: "Transition matrix P",
+      rowLabels: ["A", "B", "C"],
+      columnLabels: ["A", "B", "C"],
+      defaultValue: defaultTransitionMatrix,
+      min: 0,
+      max: 1,
+      step: 0.05,
+      format: "decimal",
+    },
+    {
+      kind: "action",
+      id: "markovStep",
+      label: "Markov sample",
+      buttonLabel: "Step",
+      min: 0,
+      max: 999,
+      step: 1,
+      defaultValue: 0,
+      format: "integer",
+    },
+  ],
+  sample: makeStochasticDataset,
+  formulas: [
+    { title: "Random walk", expression: "X_{t+1}=X_t+\\mu+\\sigma\\epsilon_t,\\quad \\epsilon_t\\sim\\mathcal{N}(0,1)" },
+    { title: "Markov transition", expression: "\\Pr(S_{t+1}=j\\mid S_t=i)=P_{ij}" },
+    { title: "State distribution", expression: "\\pi_{t+1}=\\pi_tP" },
+  ],
+  explanation: [
+    "A stochastic process is a time-indexed system whose future includes randomness instead of a single deterministic path.",
+    "Drift shifts the expected direction of a random walk, while volatility controls how rapidly many sample paths fan out.",
+    "A Markov transition matrix stores the probability of hopping from one state to the next; the next token depends on the current state and one row of probabilities.",
+  ],
+  engine: (_, params) => {
+    const drift = numberParam(params, "drift", 0.015);
+    const volatility = numberParam(params, "volatility", 0.22);
+    const pathCount = Math.round(numberParam(params, "pathCount", 28));
+    const timeSteps = Math.round(numberParam(params, "timeSteps", 72));
+    const markovStep = Math.round(numberParam(params, "markovStep", 0));
+    const transitionMatrix = matrixParam(params, "transitionMatrix", defaultTransitionMatrix);
+    const normalizedTransitionMatrix = normalizeTransitionRows(transitionMatrix);
+    const fullPaths = makeStochasticPaths(pathCount, timeSteps, drift, volatility);
+    const markovSequence = makeMarkovSequence(
+      normalizedTransitionMatrix,
+      markovStep + Math.ceil(timeSteps / 4) + 16,
+      stochasticSeed(drift, volatility, pathCount, timeSteps) + markovStep * 17,
+    );
+    const frameCount = Math.min(80, timeSteps + 1);
+    const terminalValues = fullPaths.map((path) => path.points[path.points.length - 1].y);
+    const terminalMean = average(terminalValues);
+    const terminalStd = standardDeviation(terminalValues);
+
+    const frames = Array.from({ length: frameCount }, (_, frameIndex) => {
+      const progress = frameCount === 1 ? 1 : frameIndex / (frameCount - 1);
+      const visibleStep = Math.min(timeSteps, Math.round(progress * timeSteps));
+      const markovIndex = markovStep + Math.floor(frameIndex / 8);
+      const currentState = markovSequence[markovIndex] ?? 0;
+      const nextState = markovSequence[markovIndex + 1] ?? currentState;
+      const pulseProgress = (frameIndex % 8) / 7;
+      const paths = fullPaths.map((path) => {
+        const points = path.points.slice(0, visibleStep + 1);
+        return {
+          ...path,
+          points,
+          current: points[points.length - 1] ?? path.points[0],
+        };
+      });
+
+      return {
+        type: "concept-demo" as const,
+        iteration: visibleStep,
+        points: paths.map((path) => ({
+          x: path.current.t,
+          y: path.current.y,
+          label: path.id,
+        })),
+        stochastic: {
+          drift,
+          volatility,
+          visibleStep,
+          timeSteps,
+          pathCount,
+          paths,
+          terminalMean,
+          terminalStd,
+          states: stochasticStates,
+          transitionMatrix,
+          normalizedTransitionMatrix,
+          currentState,
+          nextState,
+          pulseProgress,
+          markovStep: markovIndex,
+          sequence: markovSequence.slice(0, markovIndex + 2),
+          entropy: transitionEntropy(normalizedTransitionMatrix),
+        },
+        summary: `t=${visibleStep}/${timeSteps} · ${stochasticStates[currentState]?.label ?? "Word A"} -> ${stochasticStates[nextState]?.label ?? "Word A"} · spread ${terminalStd.toFixed(2)}`,
+      };
+    });
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Paths", value: pathCount.toLocaleString() },
+        { label: "Terminal mean", value: terminalMean.toFixed(2) },
+        { label: "Terminal spread", value: terminalStd.toFixed(2) },
+        { label: "Matrix entropy", value: transitionEntropy(normalizedTransitionMatrix).toFixed(2) },
+      ],
+    };
+  },
+  python: (params) => {
+    const drift = numberParam(params, "drift", 0.015);
+    const volatility = numberParam(params, "volatility", 0.22);
+    const pathCount = Math.round(numberParam(params, "pathCount", 28));
+    const timeSteps = Math.round(numberParam(params, "timeSteps", 72));
+    const matrix = matrixParam(params, "transitionMatrix", defaultTransitionMatrix);
+
+    return `import numpy as np
+
+mu = ${drift.toFixed(3)}
+sigma = ${volatility.toFixed(3)}
+n_paths = ${pathCount}
+steps = ${timeSteps}
+P = np.array(${JSON.stringify(matrix)}, dtype=float)
+P = P / P.sum(axis=1, keepdims=True)
+
+paths = []
+for path_id in range(n_paths):
+    x = [0.0]
+    for t in range(steps):
+        noise = np.random.normal(0, 1)
+        x.append(x[-1] + mu + sigma * noise)
+    paths.append(x)
+
+tokens = np.array(["Word A", "Word B", "Word C"])
+state = 0
+sequence = [tokens[state]]
+for _ in range(16):
+    state = np.random.choice(len(tokens), p=P[state])
+    sequence.append(tokens[state])`;
+  },
+  javascript: (params) => {
+    const drift = numberParam(params, "drift", 0.015);
+    const volatility = numberParam(params, "volatility", 0.22);
+    const pathCount = Math.round(numberParam(params, "pathCount", 28));
+    const timeSteps = Math.round(numberParam(params, "timeSteps", 72));
+    const matrix = matrixParam(params, "transitionMatrix", defaultTransitionMatrix);
+
+    return `const mu = ${drift.toFixed(3)};
+const sigma = ${volatility.toFixed(3)};
+const pathCount = ${pathCount};
+const steps = ${timeSteps};
+const P = normalizeRows(${JSON.stringify(matrix)});
+
+function weightedIndex(weights, random = Math.random()) {
+  let cumulative = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    cumulative += weights[index];
+    if (random <= cumulative) return index;
+  }
+  return weights.length - 1;
+}
+
+const paths = Array.from({ length: pathCount }, () => {
+  const x = [0];
+  for (let t = 0; t < steps; t += 1) {
+    x.push(x.at(-1) + mu + sigma * gaussianNoise());
+  }
+  return x;
+});
+
+const tokens = ["Word A", "Word B", "Word C"];
+let state = 0;
+const sequence = [tokens[state]];
+for (let step = 0; step < 16; step += 1) {
+  state = weightedIndex(P[state]);
+  sequence.push(tokens[state]);
+}`;
+  },
+});
+
+function makeStochasticDataset() {
+  return makeDataset(
+    "Generated stochastic process sample",
+    Array.from({ length: 32 }, (_, index) => ({
+      x: index,
+      y: Math.sin(index * 0.34) * 0.35,
+      label: index % 3 === 0 ? "Word A" : index % 3 === 1 ? "Word B" : "Word C",
+    })),
+  );
+}
+
+function makeStochasticPaths(
+  pathCount: number,
+  timeSteps: number,
+  drift: number,
+  volatility: number,
+) {
+  const rng = makeSeededRandom(stochasticSeed(drift, volatility, pathCount, timeSteps));
+
+  return Array.from({ length: pathCount }, (_, pathIndex) => {
+    const points = [{ t: 0, y: 0 }];
+    let current = 0;
+
+    for (let step = 1; step <= timeSteps; step += 1) {
+      current += drift + volatility * gaussianNoise(rng);
+      points.push({ t: step, y: round(current, 4) });
+    }
+
+    return {
+      id: `path-${pathIndex + 1}`,
+      color: colors[pathIndex % colors.length],
+      points,
+      current: points[0],
+      terminal: points[points.length - 1].y,
+    };
+  });
+}
+
+function stochasticSeed(
+  drift: number,
+  volatility: number,
+  pathCount: number,
+  timeSteps: number,
+) {
+  return Math.abs(
+    Math.round((drift + 1) * 100_000) +
+      Math.round(volatility * 1_000_000) +
+      pathCount * 997 +
+      timeSteps * 389,
+  );
+}
+
+function makeSeededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function gaussianNoise(rng: () => number) {
+  const u1 = Math.max(1e-9, rng());
+  const u2 = rng();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(Math.PI * 2 * u2);
+}
+
+function normalizeTransitionRows(matrix: number[][]) {
+  return matrix.map((row) => {
+    const total = row.reduce((sum, value) => sum + Math.max(0, value), 0);
+    if (total <= 0) {
+      return row.map(() => 1 / row.length);
+    }
+
+    return row.map((value) => Math.max(0, value) / total);
+  });
+}
+
+function makeMarkovSequence(matrix: number[][], length: number, seed: number) {
+  const rng = makeSeededRandom(seed);
+  const sequence = [0];
+
+  for (let index = 1; index < length; index += 1) {
+    const current = sequence[sequence.length - 1];
+    sequence.push(weightedRandomIndex(matrix[current] ?? matrix[0], rng()));
+  }
+
+  return sequence;
+}
+
+function weightedRandomIndex(weights: number[], sample: number) {
+  let cumulative = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    cumulative += weights[index];
+    if (sample <= cumulative) {
+      return index;
+    }
+  }
+
+  return Math.max(0, weights.length - 1);
+}
+
+function transitionEntropy(matrix: number[][]) {
+  const rowEntropies = matrix.map((row) =>
+    row.reduce((total, value) => (value > 0 ? total - value * Math.log2(value) : total), 0),
+  );
+  return average(rowEntropies);
+}
+
+const defaultSvdImage = makeDefaultSvdImage(36);
+
+const singularValueDecomposition = makeConceptAlgorithm({
+  id: "singular-value-decomposition",
+  name: "Singular Value Decomposition",
+  category: "Singular Value Decomposition",
+  summary: "Compresses grayscale images with low-rank SVD and animates U Sigma V^T geometry.",
+  parameters: [
+    {
+      kind: "image",
+      id: "imageMatrix",
+      label: "Grayscale image",
+      buttonLabel: "Upload image",
+      maxSize: 40,
+      defaultValue: defaultSvdImage,
+    },
+    {
+      kind: "range",
+      id: "rank",
+      label: "Rank k",
+      min: 1,
+      max: 40,
+      step: 1,
+      defaultValue: 8,
+      format: "integer",
+    },
+  ],
+  sample: makeSvdDataset,
+  formulas: [
+    { title: "SVD factorization", expression: "A=U\\Sigma V^T" },
+    { title: "Low-rank approximation", expression: "A_k=U_k\\Sigma_kV_k^T=\\sum_{i=1}^{k}\\sigma_i u_iv_i^T" },
+    { title: "Energy retained", expression: "\\frac{\\sum_{i=1}^{k}\\sigma_i^2}{\\sum_i\\sigma_i^2}" },
+  ],
+  explanation: [
+    "SVD decomposes a matrix into two rotations/reflections and one diagonal scaling stage.",
+    "For images, the largest singular values capture broad structure first; keeping more rank-one components restores edges and texture.",
+    "The geometric view shows the same factorization as transformations: V^T rotates into principal directions, Sigma stretches by variance, and U rotates into the output basis.",
+  ],
+  engine: (_, params) => {
+    const source = imageMatrixParam(params, "imageMatrix", defaultSvdImage);
+    const maxRank = Math.max(1, Math.min(source.height, source.width));
+    const rank = Math.max(1, Math.min(maxRank, Math.round(numberParam(params, "rank", 8))));
+    const decomposition = lowRankSvdApproximation(source.values, rank);
+    const frameCount = 36;
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const progress = index / Math.max(1, frameCount - 1);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: decomposition.singularValues.map((value, singularIndex) => ({
+          x: singularIndex + 1,
+          y: value,
+          label: `sigma ${singularIndex + 1}`,
+        })),
+        svd: {
+          source,
+          original: source.values,
+          approximation: decomposition.approximation,
+          rank,
+          maxRank,
+          singularValues: decomposition.singularValues,
+          retainedEnergy: decomposition.retainedEnergy,
+          reconstructionError: decomposition.reconstructionError,
+          geometry: makeSvdGeometry(progress),
+        },
+        summary: `rank ${rank}/${maxRank} · energy ${(decomposition.retainedEnergy * 100).toFixed(1)}% · error ${decomposition.reconstructionError.toFixed(3)}`,
+      };
+    });
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Rank", value: `${rank}/${maxRank}` },
+        { label: "Energy retained", value: `${Math.round(decomposition.retainedEnergy * 100)}%` },
+        { label: "Reconstruction error", value: decomposition.reconstructionError.toFixed(3) },
+        { label: "Image matrix", value: `${source.height}x${source.width}` },
+      ],
+    };
+  },
+  python: (params) => {
+    const rank = Math.round(numberParam(params, "rank", 8));
+
+    return `import numpy as np
+
+# A is a grayscale image matrix with values in [0, 1].
+k = ${rank}
+gram = A.T @ A
+eigenvalues, V = np.linalg.eig(gram)
+order = np.argsort(eigenvalues)[::-1]
+eigenvalues = np.maximum(eigenvalues[order], 0)
+V = V[:, order]
+
+singular_values = np.sqrt(eigenvalues)
+Sigma = np.diag(singular_values[:k])
+U = A @ V[:, :k] / (singular_values[:k] + 1e-12)
+
+A_k = U @ Sigma @ V[:, :k].T
+energy = np.sum(singular_values[:k] ** 2) / np.sum(singular_values ** 2)`;
+  },
+  javascript: (params) => {
+    const rank = Math.round(numberParam(params, "rank", 8));
+
+    return `const k = ${rank};
+const gram = matMul(transpose(A), A);
+const { values, vectors: V } = eigenSymmetric(gram);
+const order = values
+  .map((value, index) => ({ value: Math.max(0, value), index }))
+  .sort((a, b) => b.value - a.value);
+
+const singularValues = order.map((item) => Math.sqrt(item.value));
+const Vk = order.slice(0, k).map((item) => column(V, item.index));
+
+const Ak = zeros(A.length, A[0].length);
+for (let component = 0; component < Vk.length; component += 1) {
+  const v = Vk[component];
+  const Av = matVec(A, v);
+  for (let row = 0; row < A.length; row += 1) {
+    for (let col = 0; col < A[0].length; col += 1) {
+      Ak[row][col] += Av[row] * v[col];
+    }
+  }
+}
+
+// TensorFlow.js equivalent pieces:
+// const gram = tf.matMul(A, A, true, false);
+// const Ak = tf.matMul(tf.matMul(Uk, SigmaK), Vk.transpose());`;
+  },
+});
+
+function makeDefaultSvdImage(size: number): ImageMatrixParameterValue {
+  const center = (size - 1) / 2;
+  const values = Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, column) => {
+      const nx = (column - center) / center;
+      const ny = (row - center) / center;
+      const radius = Math.hypot(nx, ny);
+      const face = Math.max(0, 1 - radius * 0.88);
+      const diagonal = ((row + column) % 9) / 9;
+      const bars = column > size * 0.62 && row > size * 0.18 && row < size * 0.76 ? 0.34 : 0;
+      const eyeLeft = Math.exp(-((nx + 0.33) ** 2 + (ny + 0.22) ** 2) * 46) * 0.55;
+      const eyeRight = Math.exp(-((nx - 0.33) ** 2 + (ny + 0.22) ** 2) * 46) * 0.55;
+      const smile = Math.exp(-((ny - 0.28 - 0.18 * nx ** 2) ** 2) * 90) * (Math.abs(nx) < 0.55 ? 0.28 : 0);
+      return clamp(0.18 + face * 0.62 + diagonal * 0.1 + bars - eyeLeft - eyeRight - smile);
+    }),
+  );
+
+  return {
+    kind: "image-matrix",
+    name: "Generated grayscale image",
+    width: size,
+    height: size,
+    values,
+  };
+}
+
+function makeSvdDataset() {
+  return makeDataset(
+    "Generated SVD basis sample",
+    Array.from({ length: 24 }, (_, index) => ({
+      x: Math.cos((index / 24) * Math.PI * 2),
+      y: Math.sin((index / 24) * Math.PI * 2),
+      label: index % 2 === 0 ? "basis" : "sample",
+    })),
+  );
+}
+
+function lowRankSvdApproximation(matrix: number[][], rank: number) {
+  const height = matrix.length;
+  const width = matrix[0]?.length ?? 0;
+  const gram = multiplyTransposeByMatrix(matrix);
+  const eigen = jacobiEigenSymmetric(gram);
+  const components = eigen.values
+    .map((value, index) => ({
+      value: Math.max(0, value),
+      vector: eigen.vectors[index],
+    }))
+    .sort((a, b) => b.value - a.value);
+  const singularValues = components.map((component) => Math.sqrt(component.value));
+  const approximation = zeroMatrix(height, width);
+  const usableRank = Math.min(rank, components.length);
+
+  for (let componentIndex = 0; componentIndex < usableRank; componentIndex += 1) {
+    const component = components[componentIndex];
+    const sigma = Math.sqrt(component.value);
+    if (sigma < 1e-10) {
+      continue;
+    }
+
+    const av = multiplyMatrixVector(matrix, component.vector);
+    for (let row = 0; row < height; row += 1) {
+      for (let column = 0; column < width; column += 1) {
+        approximation[row][column] += av[row] * component.vector[column];
+      }
+    }
+  }
+
+  const totalEnergy = Math.max(1e-12, singularValues.reduce((sum, value) => sum + value ** 2, 0));
+  const retainedEnergy =
+    singularValues.slice(0, usableRank).reduce((sum, value) => sum + value ** 2, 0) / totalEnergy;
+  const originalEnergy = Math.max(1e-12, matrix.flat().reduce((sum, value) => sum + value ** 2, 0));
+  let squaredError = 0;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      squaredError += (matrix[row][column] - approximation[row][column]) ** 2;
+      approximation[row][column] = clamp(approximation[row][column]);
+    }
+  }
+
+  return {
+    approximation,
+    singularValues,
+    retainedEnergy,
+    reconstructionError: Math.sqrt(squaredError / originalEnergy),
+  };
+}
+
+function multiplyTransposeByMatrix(matrix: number[][]) {
+  const height = matrix.length;
+  const width = matrix[0]?.length ?? 0;
+  const result = zeroMatrix(width, width);
+
+  for (let row = 0; row < height; row += 1) {
+    for (let left = 0; left < width; left += 1) {
+      for (let right = left; right < width; right += 1) {
+        result[left][right] += matrix[row][left] * matrix[row][right];
+      }
+    }
+  }
+
+  for (let left = 0; left < width; left += 1) {
+    for (let right = left + 1; right < width; right += 1) {
+      result[right][left] = result[left][right];
+    }
+  }
+
+  return result;
+}
+
+function multiplyMatrixVector(matrix: number[][], vector: number[]) {
+  return matrix.map((row) =>
+    row.reduce((sum, value, index) => sum + value * (vector[index] ?? 0), 0),
+  );
+}
+
+function zeroMatrix(height: number, width: number) {
+  return Array.from({ length: height }, () => Array.from({ length: width }, () => 0));
+}
+
+function identityMatrix(size: number): number[][] {
+  return Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, column) => (row === column ? 1 : 0)),
+  );
+}
+
+function jacobiEigenSymmetric(matrix: number[][]) {
+  const size = matrix.length;
+  const values = matrix.map((row) => [...row]);
+  const vectors = identityMatrix(size);
+  const maxSweeps = Math.max(40, size * 3);
+
+  for (let sweep = 0; sweep < maxSweeps; sweep += 1) {
+    let p = 0;
+    let q = 1;
+    let largest = 0;
+
+    for (let row = 0; row < size; row += 1) {
+      for (let column = row + 1; column < size; column += 1) {
+        const magnitude = Math.abs(values[row][column]);
+        if (magnitude > largest) {
+          largest = magnitude;
+          p = row;
+          q = column;
+        }
+      }
+    }
+
+    if (largest < 1e-10 || size < 2) {
+      break;
+    }
+
+    const app = values[p][p];
+    const aqq = values[q][q];
+    const apq = values[p][q];
+    const angle = 0.5 * Math.atan2(2 * apq, aqq - app);
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+
+    for (let index = 0; index < size; index += 1) {
+      if (index !== p && index !== q) {
+        const aip = values[index][p];
+        const aiq = values[index][q];
+        values[index][p] = c * aip - s * aiq;
+        values[p][index] = values[index][p];
+        values[index][q] = s * aip + c * aiq;
+        values[q][index] = values[index][q];
+      }
+    }
+
+    values[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
+    values[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
+    values[p][q] = 0;
+    values[q][p] = 0;
+
+    for (let row = 0; row < size; row += 1) {
+      const vip = vectors[row][p];
+      const viq = vectors[row][q];
+      vectors[row][p] = c * vip - s * viq;
+      vectors[row][q] = s * vip + c * viq;
+    }
+  }
+
+  return {
+    values: values.map((row, index) => row[index]),
+    vectors: values.map((_, column) => vectors.map((row) => row[column])),
+  };
+}
+
+function makeSvdGeometry(progress: number) {
+  const inputVectors = [
+    { x: 1, y: 0, color: "#2f6fbe", label: "e1" },
+    { x: 0, y: 1, color: "#0f766e", label: "e2" },
+    { x: 0.72, y: 0.54, color: "#d34a43", label: "x" },
+  ];
+  const angleV = -0.62;
+  const angleU = 0.74;
+  const scaleX = 1.46;
+  const scaleY = 0.54;
+  const phaseIndex = Math.min(2, Math.floor(progress * 3));
+  const phaseProgress = phaseIndex === 2 ? progress * 3 - 2 : progress * 3 - phaseIndex;
+  const eased = 0.5 - Math.cos(Math.max(0, Math.min(1, phaseProgress)) * Math.PI) / 2;
+
+  let phase: "V^T rotation" | "Sigma scaling" | "U rotation" = "V^T rotation";
+  let currentVectors = inputVectors.map((vector) => ({
+    ...rotateSvdVector(vector, angleV * eased),
+    color: vector.color,
+    label: vector.label,
+  }));
+
+  if (phaseIndex === 1) {
+    phase = "Sigma scaling";
+    const rotated = inputVectors.map((vector) => rotateSvdVector(vector, angleV));
+    currentVectors = rotated.map((vector, index) => ({
+      x: vector.x * (1 + (scaleX - 1) * eased),
+      y: vector.y * (1 + (scaleY - 1) * eased),
+      color: inputVectors[index].color,
+      label: inputVectors[index].label,
+    }));
+  } else if (phaseIndex === 2) {
+    phase = "U rotation";
+    const scaled = inputVectors.map((vector) => {
+      const rotated = rotateSvdVector(vector, angleV);
+      return { x: rotated.x * scaleX, y: rotated.y * scaleY };
+    });
+    currentVectors = scaled.map((vector, index) => ({
+      ...rotateSvdVector(vector, angleU * eased),
+      color: inputVectors[index].color,
+      label: inputVectors[index].label,
+    }));
+  }
+
+  return {
+    phase,
+    progress: eased,
+    angleV,
+    angleU,
+    scaleX,
+    scaleY,
+    inputVectors,
+    currentVectors,
+  };
+}
+
+function rotateSvdVector(vector: { x: number; y: number }, angle: number) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return {
+    x: vector.x * c - vector.y * s,
+    y: vector.x * s + vector.y * c,
+  };
+}
+
+const convexOptimization = makeConceptAlgorithm({
+  id: "convex-optimization",
+  name: "Convex Optimization",
+  category: "Convex Optimization",
+  summary: "Shows constrained descent on a convex bowl and detects non-convex function morphs.",
+  parameters: [
+    {
+      kind: "select",
+      id: "optimizer",
+      label: "Optimizer",
+      defaultValue: "projected-gradient",
+      options: [
+        { label: "Projected Gradient", value: "projected-gradient" },
+        { label: "Newton's Method", value: "newton" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "curvatureX",
+      label: "Hessian xx",
+      min: 0.2,
+      max: 2.4,
+      step: 0.05,
+      defaultValue: 1.25,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "curvatureY",
+      label: "Hessian yy",
+      min: -0.8,
+      max: 2.4,
+      step: 0.05,
+      defaultValue: 0.9,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "crossTerm",
+      label: "Hessian xy",
+      min: -1.1,
+      max: 1.1,
+      step: 0.05,
+      defaultValue: 0.15,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "sCurve",
+      label: "S-curve morph",
+      min: 0,
+      max: 1.4,
+      step: 0.05,
+      defaultValue: 0.15,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "constraintSize",
+      label: "Constraint box",
+      min: 0.55,
+      max: 1.25,
+      step: 0.05,
+      defaultValue: 0.85,
+      format: "decimal",
+    },
+  ],
+  sample: makeConvexDataset,
+  formulas: [
+    { title: "Quadratic objective", expression: "f(x)=\\frac{1}{2}x^THx+c^Tx" },
+    { title: "Convexity check", expression: "H\\succeq0\\quad\\Rightarrow\\quad f\\;\\text{is convex}" },
+    { title: "Projected gradient", expression: "x_{t+1}=\\Pi_C(x_t-\\eta\\nabla f(x_t))" },
+    { title: "Newton step", expression: "x_{t+1}=\\Pi_C(x_t-H^{-1}\\nabla f(x_t))" },
+  ],
+  explanation: [
+    "Convex optimization is stable because any local minimum is also global when the objective curvature stays positive semidefinite.",
+    "The box walls represent inequality constraints. Projection clips each proposed update back into the feasible set.",
+    "The morph sliders intentionally break convexity: negative curvature or a strong S-curve creates local traps, which is why objective structure matters in real training systems.",
+  ],
+  engine: (_, params) => {
+    const optimizer = convexOptimizerParam(params, "optimizer", "projected-gradient");
+    const curvatureX = numberParam(params, "curvatureX", 1.25);
+    const curvatureY = numberParam(params, "curvatureY", 0.9);
+    const crossTerm = numberParam(params, "crossTerm", 0.15);
+    const sCurve = numberParam(params, "sCurve", 0.15);
+    const constraintSize = numberParam(params, "constraintSize", 0.85);
+    const objective = {
+      curvatureX,
+      curvatureY,
+      crossTerm,
+      sCurve,
+      tiltX: -1.42,
+      tiltY: 1.18,
+    };
+    const constraint = {
+      minX: -constraintSize,
+      maxX: constraintSize,
+      minY: -constraintSize,
+      maxY: constraintSize,
+    };
+    const determinant = curvatureX * curvatureY - crossTerm ** 2;
+    const isConvex = curvatureX > 0 && curvatureY > 0 && determinant > 0.02 && sCurve < 0.7;
+    const statusReason = isConvex
+      ? "Positive definite Hessian and mild morph"
+      : sCurve >= 0.7
+        ? "S-curve morph creates local minima traps"
+        : "Hessian is not positive definite";
+    const trajectory = makeConvexTrajectory(optimizer, objective, constraint, isConvex);
+    const unconstrained = convexUnconstrainedPoint(objective);
+    const constrainedOptimum = approximateConstrainedOptimum(objective, constraint);
+    const frameCount = Math.min(48, trajectory.length);
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const sourceIndex = Math.min(trajectory.length - 1, Math.round((index / Math.max(1, frameCount - 1)) * (trajectory.length - 1)));
+      const path = trajectory.slice(0, sourceIndex + 1);
+      const current = path[path.length - 1];
+      const gradient = convexGradient(objective, current.x, current.y);
+      const gradientNorm = Math.hypot(gradient.x, gradient.y);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: path.map((point, pointIndex) => ({ x: point.x, y: point.y, label: pointIndex })),
+        convex: {
+          optimizer,
+          status: isConvex ? "convex" as const : "non-convex" as const,
+          statusReason,
+          step: sourceIndex,
+          objective,
+          constraint,
+          path,
+          current,
+          unconstrained,
+          constrainedOptimum,
+          gradientNorm,
+        },
+        summary: `Status: ${isConvex ? "Convex" : "Non-Convex"} · ${optimizerLabel(optimizer)} · ${current.activeConstraint ?? "interior"}`,
+      };
+    });
+    const final = frames[frames.length - 1].convex;
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Status", value: final.status === "convex" ? "Convex" : "Non-convex" },
+        { label: "Optimizer", value: optimizerLabel(optimizer) },
+        { label: "Gradient norm", value: final.gradientNorm.toFixed(3) },
+        { label: "Constraint", value: final.current.activeConstraint ?? "interior" },
+      ],
+    };
+  },
+  python: (params) => {
+    const optimizer = convexOptimizerParam(params, "optimizer", "projected-gradient");
+    return `import numpy as np
+
+H = np.array([
+    [${numberParam(params, "curvatureX", 1.25).toFixed(2)}, ${numberParam(params, "crossTerm", 0.15).toFixed(2)}],
+    [${numberParam(params, "crossTerm", 0.15).toFixed(2)}, ${numberParam(params, "curvatureY", 0.9).toFixed(2)}],
+])
+c = np.array([-1.42, 1.18])
+lower = np.array([-${numberParam(params, "constraintSize", 0.85).toFixed(2)}, -${numberParam(params, "constraintSize", 0.85).toFixed(2)}])
+upper = np.array([${numberParam(params, "constraintSize", 0.85).toFixed(2)}, ${numberParam(params, "constraintSize", 0.85).toFixed(2)}])
+
+def project(x):
+    return np.minimum(upper, np.maximum(lower, x))
+
+def grad(x):
+    return H @ x + c
+
+eigvals = np.linalg.eigvals(H)
+status = "convex" if np.all(eigvals > 0) else "non-convex"
+x = np.array([-0.72, 0.72])
+track = [x.copy()]
+for step in range(32):
+    g = grad(x)
+    if "${optimizer}" == "newton":
+        proposal = x - np.linalg.inv(H + 1e-6 * np.eye(2)) @ g
+    else:
+        proposal = x - 0.28 * g
+    x = project(proposal)
+    track.append(x.copy())`;
+  },
+  javascript: (params) => {
+    const optimizer = convexOptimizerParam(params, "optimizer", "projected-gradient");
+    return `const H = [
+  [${numberParam(params, "curvatureX", 1.25).toFixed(2)}, ${numberParam(params, "crossTerm", 0.15).toFixed(2)}],
+  [${numberParam(params, "crossTerm", 0.15).toFixed(2)}, ${numberParam(params, "curvatureY", 0.9).toFixed(2)}],
+];
+const c = [-1.42, 1.18];
+const box = ${numberParam(params, "constraintSize", 0.85).toFixed(2)};
+
+const project = ([x, y]) => [
+  Math.min(box, Math.max(-box, x)),
+  Math.min(box, Math.max(-box, y)),
+];
+const grad = ([x, y]) => [
+  H[0][0] * x + H[0][1] * y + c[0],
+  H[1][0] * x + H[1][1] * y + c[1],
+];
+
+let x = [-0.72, 0.72];
+const track = [x];
+for (let step = 0; step < 32; step += 1) {
+  const g = grad(x);
+  const proposal = "${optimizer}" === "newton"
+    ? subtract(x, matVec(inverse2x2(H), g))
+    : subtract(x, scale(g, 0.28));
+  x = project(proposal);
+  track.push(x);
+}
+
+// TensorFlow.js sketch:
+// const hessian = tf.hessian(objectiveFn)(tf.tensor(x));
+// const step = tf.linalg.solve(hessian, gradient.reshape([2, 1]));`;
+  },
+});
+
+function makeConvexDataset() {
+  return makeDataset(
+    "Generated convex optimization sample",
+    Array.from({ length: 36 }, (_, index) => {
+      const angle = (index / 36) * Math.PI * 2;
+      return { x: Math.cos(angle), y: Math.sin(angle), label: "level set" };
+    }),
+  );
+}
+
+function convexOptimizerParam(
+  params: ParameterState,
+  key: string,
+  fallback: ConvexOptimizerKey,
+): ConvexOptimizerKey {
+  const value = stringParam(params, key, fallback);
+  return value === "newton" || value === "projected-gradient" ? value : fallback;
+}
+
+function makeConvexTrajectory(
+  optimizer: ConvexOptimizerKey,
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  },
+  constraint: { minX: number; maxX: number; minY: number; maxY: number },
+  isConvex: boolean,
+) {
+  const path = [
+    convexPoint(objective, {
+      x: constraint.minX * 0.85,
+      y: constraint.maxY * 0.85,
+      projected: false,
+    }),
+  ];
+  let point = { x: path[0].x, y: path[0].y };
+  const learningRate = optimizer === "newton" ? 0.74 : 0.28;
+
+  for (let step = 0; step < 44; step += 1) {
+    const gradient = convexGradient(objective, point.x, point.y);
+    let delta = { x: gradient.x, y: gradient.y };
+    if (optimizer === "newton" && isConvex) {
+      delta = solveConvexNewtonDelta(objective, gradient);
+    }
+    const proposal = {
+      x: point.x - learningRate * delta.x,
+      y: point.y - learningRate * delta.y,
+    };
+    const projected = projectToConvexBox(proposal, constraint);
+    point = { x: projected.x, y: projected.y };
+    path.push(convexPoint(objective, projected));
+  }
+
+  return path;
+}
+
+function convexPoint(
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  },
+  point: { x: number; y: number; projected: boolean; activeConstraint?: string },
+) {
+  return {
+    ...point,
+    z: convexObjectiveValue(objective, point.x, point.y),
+  };
+}
+
+function convexObjectiveValue(
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  },
+  x: number,
+  y: number,
+) {
+  const quadratic =
+    0.5 * objective.curvatureX * x ** 2 +
+    objective.crossTerm * x * y +
+    0.5 * objective.curvatureY * y ** 2 +
+    objective.tiltX * x +
+    objective.tiltY * y;
+  const morph = objective.sCurve * (0.18 * x ** 4 - 0.7 * x ** 2 + 0.14 * Math.sin(3 * y));
+  return quadratic + morph + 2.6;
+}
+
+function convexGradient(
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  },
+  x: number,
+  y: number,
+) {
+  return {
+    x:
+      objective.curvatureX * x +
+      objective.crossTerm * y +
+      objective.tiltX +
+      objective.sCurve * (0.72 * x ** 3 - 1.4 * x),
+    y:
+      objective.crossTerm * x +
+      objective.curvatureY * y +
+      objective.tiltY +
+      objective.sCurve * 0.42 * Math.cos(3 * y),
+  };
+}
+
+function solveConvexNewtonDelta(
+  objective: { curvatureX: number; curvatureY: number; crossTerm: number },
+  gradient: { x: number; y: number },
+) {
+  const det = objective.curvatureX * objective.curvatureY - objective.crossTerm ** 2;
+  if (Math.abs(det) < 1e-6) {
+    return gradient;
+  }
+
+  return {
+    x: (objective.curvatureY * gradient.x - objective.crossTerm * gradient.y) / det,
+    y: (-objective.crossTerm * gradient.x + objective.curvatureX * gradient.y) / det,
+  };
+}
+
+function projectToConvexBox(
+  point: { x: number; y: number },
+  constraint: { minX: number; maxX: number; minY: number; maxY: number },
+) {
+  const x = Math.min(constraint.maxX, Math.max(constraint.minX, point.x));
+  const y = Math.min(constraint.maxY, Math.max(constraint.minY, point.y));
+  const projected = Math.abs(x - point.x) > 1e-6 || Math.abs(y - point.y) > 1e-6;
+  const active: string[] = [];
+  if (Math.abs(x - constraint.minX) < 1e-5) active.push("x min");
+  if (Math.abs(x - constraint.maxX) < 1e-5) active.push("x max");
+  if (Math.abs(y - constraint.minY) < 1e-5) active.push("y min");
+  if (Math.abs(y - constraint.maxY) < 1e-5) active.push("y max");
+
+  return {
+    x,
+    y,
+    projected,
+    activeConstraint: active.length ? active.join(" + ") : undefined,
+  };
+}
+
+function convexUnconstrainedPoint(objective: {
+  curvatureX: number;
+  curvatureY: number;
+  crossTerm: number;
+  sCurve: number;
+  tiltX: number;
+  tiltY: number;
+}) {
+  const det = objective.curvatureX * objective.curvatureY - objective.crossTerm ** 2;
+  if (Math.abs(det) < 1e-6) {
+    return convexPoint(objective, { x: 0, y: 0, projected: false });
+  }
+
+  const x = (-objective.curvatureY * objective.tiltX + objective.crossTerm * objective.tiltY) / det;
+  const y = (objective.crossTerm * objective.tiltX - objective.curvatureX * objective.tiltY) / det;
+  return convexPoint(objective, { x, y, projected: false });
+}
+
+function approximateConstrainedOptimum(
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  },
+  constraint: { minX: number; maxX: number; minY: number; maxY: number },
+) {
+  let best = convexPoint(objective, { x: constraint.minX, y: constraint.minY, projected: false });
+  const samples = 34;
+  for (let row = 0; row <= samples; row += 1) {
+    for (let column = 0; column <= samples; column += 1) {
+      const x = constraint.minX + (column / samples) * (constraint.maxX - constraint.minX);
+      const y = constraint.minY + (row / samples) * (constraint.maxY - constraint.minY);
+      const candidate = convexPoint(objective, { x, y, projected: false });
+      if (candidate.z < best.z) {
+        best = candidate;
+      }
+    }
+  }
+
+  return best;
+}
+
+function optimizerLabel(optimizer: ConvexOptimizerKey) {
+  return optimizer === "newton" ? "Newton" : "Projected GD";
+}
 
 const neuralNetwork = makeConceptAlgorithm({
   id: "neural-network",
@@ -3398,6 +4591,9 @@ export const categoryDemos: AlgorithmDefinition[] = [
   anomalyDetection,
   imbalancedData,
   timeSeries,
+  stochasticProcesses,
+  singularValueDecomposition,
+  convexOptimization,
   neuralNetwork,
   multiLayerNetwork,
   activationFunctions,

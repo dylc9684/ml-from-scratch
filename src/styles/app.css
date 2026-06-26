@@ -423,11 +423,17 @@ h1 {
 .visual-shell.activation-shell,
 .visual-shell.loss-shell,
 .visual-shell.optimizer-shell,
-.visual-shell.framework-shell {
+.visual-shell.framework-shell,
+.visual-shell.stochastic-shell,
+.visual-shell.svd-shell,
+.visual-shell.convex-shell {
   min-height: 620px;
 }
 
-.visual-shell.framework-shell {
+.visual-shell.framework-shell,
+.visual-shell.stochastic-shell,
+.visual-shell.svd-shell,
+.visual-shell.convex-shell {
   min-height: 680px;
 }
 
@@ -442,11 +448,17 @@ h1 {
 .visual-shell.activation-shell canvas,
 .visual-shell.loss-shell canvas,
 .visual-shell.optimizer-shell canvas,
-.visual-shell.framework-shell canvas {
+.visual-shell.framework-shell canvas,
+.visual-shell.stochastic-shell canvas,
+.visual-shell.svd-shell canvas,
+.visual-shell.convex-shell canvas {
   min-height: 620px;
 }
 
-.visual-shell.framework-shell canvas {
+.visual-shell.framework-shell canvas,
+.visual-shell.stochastic-shell canvas,
+.visual-shell.svd-shell canvas,
+.visual-shell.convex-shell canvas {
   min-height: 680px;
 }
 
@@ -581,6 +593,105 @@ h1 {
 
 .action-button {
   width: 100%;
+}
+
+.matrix-control {
+  display: grid;
+  gap: 12px;
+}
+
+.matrix-grid {
+  display: grid;
+  grid-template-columns: minmax(44px, 0.9fr) repeat(3, minmax(48px, 1fr)) minmax(46px, 0.8fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.matrix-heading,
+.matrix-row-sum {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.matrix-sum-heading {
+  color: var(--accent-strong);
+}
+
+.matrix-row-sum {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-row-sum.balanced {
+  color: var(--accent-strong);
+}
+
+.matrix-grid input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  padding: 0 5px;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.image-control {
+  display: grid;
+  gap: 12px;
+}
+
+.image-upload-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.image-upload-button input {
+  display: none;
+}
+
+.image-upload-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.image-control-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.image-control-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .control-group {
@@ -910,7 +1021,13 @@ select {
   }
 
   .visual-shell.framework-shell,
-  .visual-shell.framework-shell canvas {
+  .visual-shell.framework-shell canvas,
+  .visual-shell.stochastic-shell,
+  .visual-shell.stochastic-shell canvas,
+  .visual-shell.svd-shell,
+  .visual-shell.svd-shell canvas,
+  .visual-shell.convex-shell,
+  .visual-shell.convex-shell canvas {
     min-height: 860px;
   }
 }

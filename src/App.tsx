@@ -20,6 +20,7 @@ import type {
   DatasetMapping,
   NormalizedDataset,
   ParameterState,
+  ParameterValue,
   RawDataset,
 } from "./types/algorithm";
 
@@ -106,7 +107,7 @@ export default function App() {
     setActivePanel("controls");
   };
 
-  const handleParamChange = (key: string, value: string | number | boolean) => {
+  const handleParamChange = (key: string, value: ParameterValue) => {
     setParams((current) => ({
       ...current,
       [key]: value,

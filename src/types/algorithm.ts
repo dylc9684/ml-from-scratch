@@ -14,6 +14,9 @@ export const algorithmCategories = [
   "Anomaly Detection",
   "Handling Imbalanced Data",
   "Time Series Fundamentals",
+  "Stochastic Processes",
+  "Singular Value Decomposition",
+  "Convex Optimization",
   "Neural Networks",
   "Multi-Layer Networks",
   "Activation Functions — ReLU, Sigmoid, GELU",
@@ -25,7 +28,18 @@ export const algorithmCategories = [
 
 export type AlgorithmCategory = (typeof algorithmCategories)[number];
 
-export type ParameterValue = number | string | boolean;
+export type MatrixParameterValue = number[][];
+
+export type ImageMatrixParameterValue = {
+  kind: "image-matrix";
+  name: string;
+  width: number;
+  height: number;
+  values: MatrixParameterValue;
+  dataUrl?: string;
+};
+
+export type ParameterValue = number | string | boolean | MatrixParameterValue | ImageMatrixParameterValue;
 
 export type ParameterState = Record<string, ParameterValue>;
 
@@ -78,12 +92,36 @@ export type ToggleParameter = {
   defaultValue: boolean;
 };
 
+export type MatrixParameter = {
+  kind: "matrix";
+  id: string;
+  label: string;
+  rowLabels: string[];
+  columnLabels: string[];
+  defaultValue: MatrixParameterValue;
+  min: number;
+  max: number;
+  step: number;
+  format?: "integer" | "decimal" | "percent";
+};
+
+export type ImageParameter = {
+  kind: "image";
+  id: string;
+  label: string;
+  buttonLabel: string;
+  maxSize: number;
+  defaultValue: ImageMatrixParameterValue;
+};
+
 export type ParameterDefinition =
   | NumericParameter
   | StepperParameter
   | ActionParameter
   | SelectParameter
-  | ToggleParameter;
+  | ToggleParameter
+  | MatrixParameter
+  | ImageParameter;
 
 export type DataPoint = {
   x: number;
@@ -369,6 +407,115 @@ export type FrameworkState = {
   loss: number;
 };
 
+export type StochasticPathPoint = {
+  t: number;
+  y: number;
+};
+
+export type StochasticPathState = {
+  id: string;
+  color: string;
+  points: StochasticPathPoint[];
+  current: StochasticPathPoint;
+  terminal: number;
+};
+
+export type MarkovNodeState = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type StochasticState = {
+  drift: number;
+  volatility: number;
+  visibleStep: number;
+  timeSteps: number;
+  pathCount: number;
+  paths: StochasticPathState[];
+  terminalMean: number;
+  terminalStd: number;
+  states: MarkovNodeState[];
+  transitionMatrix: MatrixParameterValue;
+  normalizedTransitionMatrix: MatrixParameterValue;
+  currentState: number;
+  nextState: number;
+  pulseProgress: number;
+  markovStep: number;
+  sequence: number[];
+  entropy: number;
+};
+
+export type SvdGeometryPhase = "V^T rotation" | "Sigma scaling" | "U rotation";
+
+export type SvdVector2D = {
+  x: number;
+  y: number;
+  color: string;
+  label: string;
+};
+
+export type SvdGeometryState = {
+  phase: SvdGeometryPhase;
+  progress: number;
+  angleV: number;
+  angleU: number;
+  scaleX: number;
+  scaleY: number;
+  inputVectors: SvdVector2D[];
+  currentVectors: SvdVector2D[];
+};
+
+export type SvdState = {
+  source: ImageMatrixParameterValue;
+  original: MatrixParameterValue;
+  approximation: MatrixParameterValue;
+  rank: number;
+  maxRank: number;
+  singularValues: number[];
+  retainedEnergy: number;
+  reconstructionError: number;
+  geometry: SvdGeometryState;
+};
+
+export type ConvexOptimizerKey = "projected-gradient" | "newton";
+
+export type ConvexStatus = "convex" | "non-convex";
+
+export type ConvexTrajectoryPoint = {
+  x: number;
+  y: number;
+  z: number;
+  projected: boolean;
+  activeConstraint?: string;
+};
+
+export type ConvexState = {
+  optimizer: ConvexOptimizerKey;
+  status: ConvexStatus;
+  statusReason: string;
+  step: number;
+  objective: {
+    curvatureX: number;
+    curvatureY: number;
+    crossTerm: number;
+    sCurve: number;
+    tiltX: number;
+    tiltY: number;
+  };
+  constraint: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  };
+  path: ConvexTrajectoryPoint[];
+  current: ConvexTrajectoryPoint;
+  unconstrained: ConvexTrajectoryPoint;
+  constrainedOptimum: ConvexTrajectoryPoint;
+  gradientNorm: number;
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -383,6 +530,9 @@ export type ConceptFrame = {
   loss?: LossState;
   optimizer?: OptimizerState;
   framework?: FrameworkState;
+  stochastic?: StochasticState;
+  svd?: SvdState;
+  convex?: ConvexState;
   summary: string;
 };
 
