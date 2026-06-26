@@ -1,4 +1,7 @@
 import type {
+  ActivationCurve,
+  ActivationFunctionKey,
+  ActivationNeuronState,
   AlgorithmCategory,
   AlgorithmDefinition,
   BackpropFormulaValue,
@@ -1132,6 +1135,319 @@ function forward(batch) {
   },
 });
 
+const activationFunctions = makeConceptAlgorithm({
+  id: "activation-functions",
+  name: "Activation Functions",
+  category: "Activation Functions — ReLU, Sigmoid, GELU",
+  summary: "Compares activation curves, derivative flow, and dying-ReLU neuron states.",
+  parameters: [
+    {
+      kind: "range",
+      id: "inputX",
+      label: "Input x",
+      min: -6,
+      max: 6,
+      step: 0.1,
+      defaultValue: -1.5,
+      format: "decimal",
+    },
+    {
+      kind: "select",
+      id: "selectedActivation",
+      label: "Activation",
+      defaultValue: "relu",
+      options: [
+        { label: "ReLU", value: "relu" },
+        { label: "Sigmoid", value: "sigmoid" },
+        { label: "LeakyReLU", value: "leaky-relu" },
+        { label: "GELU", value: "gelu" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "leakySlope",
+      label: "Leaky slope",
+      min: 0.01,
+      max: 0.3,
+      step: 0.01,
+      defaultValue: 0.06,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "negativeShift",
+      label: "Data shift",
+      min: -4,
+      max: 2,
+      step: 0.1,
+      defaultValue: -1.6,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "learningRate",
+      label: "Learning rate",
+      min: 0.01,
+      max: 1.2,
+      step: 0.01,
+      defaultValue: 0.35,
+      format: "decimal",
+    },
+  ],
+  sample: makeActivationDataset,
+  formulas: [
+    { title: "Sigmoid", expression: "\\sigma(x)=\\frac{1}{1+e^{-x}},\\quad \\sigma'(x)=\\sigma(x)(1-\\sigma(x))" },
+    { title: "ReLU", expression: "\\operatorname{ReLU}(x)=\\max(0,x),\\quad \\operatorname{ReLU}'(x)=\\mathbb{1}_{x>0}" },
+    { title: "LeakyReLU", expression: "f(x)=\\max(\\alpha x,x),\\quad f'(x)=\\alpha\\;\\text{if}\\;x<0\\;\\text{else}\\;1" },
+    { title: "GELU", expression: "\\operatorname{GELU}(x)\\approx \\frac{x}{2}\\left(1+\\tanh\\left(\\sqrt{2/\\pi}(x+0.044715x^3)\\right)\\right)" },
+  ],
+  explanation: [
+    "Activation functions decide how much signal a neuron passes forward and how much gradient can return during backpropagation.",
+    "Sigmoid squashes values into 0 to 1, but its derivative gets tiny at both extremes, which is the classic vanishing-gradient shape.",
+    "ReLU is fast and sparse, but a neuron pushed negative can receive exactly zero gradient. LeakyReLU and GELU preserve some negative-side gradient, so the same units can recover.",
+  ],
+  engine: (_, params) => {
+    const selected = activationKeyParam(params, "selectedActivation", "relu");
+    const targetX = numberParam(params, "inputX", -1.5);
+    const leakySlope = numberParam(params, "leakySlope", 0.06);
+    const negativeShift = numberParam(params, "negativeShift", -1.6);
+    const learningRate = numberParam(params, "learningRate", 0.35);
+    const frameCount = 22;
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const progress = index / (frameCount - 1);
+      const animatedX = targetX * (0.18 + progress * 0.82);
+      const curves = makeActivationCurves(animatedX, leakySlope);
+      const neurons = makeActivationNeurons(selected, negativeShift, learningRate, leakySlope);
+      const selectedCurve = curves.find((curve) => curve.id === selected) ?? curves[0];
+      const deadCount = neurons.filter((neuron) => neuron.status === "dead").length;
+      const saturatedCount = neurons.filter((neuron) => neuron.status === "saturated").length;
+      const recoveryCount = neurons.filter((neuron) => neuron.status === "recovering").length;
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: selectedCurve.points,
+        activation: {
+          selected,
+          inputX: animatedX,
+          targetX,
+          learningRate,
+          negativeShift,
+          leakySlope,
+          curves,
+          neurons,
+          deadCount,
+          saturatedCount,
+          recoveryCount,
+        },
+        summary: `${selectedCurve.label} f(${animatedX.toFixed(2)})=${selectedCurve.value.toFixed(3)} · f'=${selectedCurve.derivative.toFixed(3)} · ${deadCount} dead · ${recoveryCount} recovering`,
+      };
+    });
+    const final = frames[frames.length - 1].activation;
+    const selectedCurve = final.curves.find((curve) => curve.id === selected) ?? final.curves[0];
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "f(x)", value: selectedCurve.value.toFixed(4) },
+        { label: "f'(x)", value: selectedCurve.derivative.toFixed(4) },
+        { label: "Dead neurons", value: String(final.deadCount) },
+        {
+          label: "Recovering",
+          value: selected === "leaky-relu" || selected === "gelu" ? String(final.recoveryCount) : "0",
+        },
+      ],
+    };
+  },
+  python: (params) => {
+    const slope = numberParam(params, "leakySlope", 0.06);
+    return `import numpy as np
+
+alpha = ${slope}
+x = np.linspace(-6, 6, 241)
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def sigmoid_grad(x):
+    y = sigmoid(x)
+    return y * (1 - y)
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_grad(x):
+    mask = x > 0
+    return mask.astype(float)
+
+def leaky_relu(x, alpha=alpha):
+    return np.where(x > 0, x, alpha * x)
+
+def leaky_relu_grad(x, alpha=alpha):
+    return np.where(x > 0, 1.0, alpha)
+
+def gelu(x):
+    u = np.sqrt(2 / np.pi) * (x + 0.044715 * x**3)
+    return 0.5 * x * (1 + np.tanh(u))
+
+dead_relu_mask = (x < 0) & (relu_grad(x) == 0)
+print(dead_relu_mask.sum())`;
+  },
+  javascript: (params) => {
+    const slope = numberParam(params, "leakySlope", 0.06);
+    return `const alpha = ${slope};
+
+const sigmoid = (x) => 1 / (1 + Math.exp(-x));
+const sigmoidGrad = (x) => {
+  const y = sigmoid(x);
+  return y * (1 - y);
+};
+
+const relu = (x) => Math.max(0, x);
+const reluGrad = (x) => (x > 0 ? 1 : 0);
+
+const leakyRelu = (x) => (x > 0 ? x : alpha * x);
+const leakyReluGrad = (x) => (x > 0 ? 1 : alpha);
+
+function gelu(x) {
+  const u = Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3);
+  return 0.5 * x * (1 + Math.tanh(u));
+}
+
+// TensorFlow.js equivalent:
+const yRelu = tf.relu(tf.tensor([-2, -1, 0, 1, 2]));
+const deadReluMask = [-2, -1, 0, 1, 2].map((value) => reluGrad(value) === 0);`;
+  },
+});
+
+function makeActivationDataset() {
+  return makeDataset(
+    "Activation input sweep",
+    Array.from({ length: 121 }, (_, index) => {
+      const x = -6 + index * 0.1;
+      return { x: round(x), y: round(sigmoid(x)), label: "sigmoid" };
+    }),
+  );
+}
+
+function activationKeyParam(
+  params: ParameterState,
+  key: string,
+  fallback: ActivationFunctionKey,
+): ActivationFunctionKey {
+  const value = stringParam(params, key, fallback);
+  return value === "sigmoid" || value === "relu" || value === "leaky-relu" || value === "gelu"
+    ? value
+    : fallback;
+}
+
+function makeActivationCurves(inputX: number, leakySlope: number): ActivationCurve[] {
+  const definitions: Array<{ id: ActivationFunctionKey; label: string; color: string }> = [
+    { id: "sigmoid", label: "Sigmoid", color: "#2f6fbe" },
+    { id: "relu", label: "ReLU", color: "#d34a43" },
+    { id: "leaky-relu", label: "LeakyReLU", color: "#0f766e" },
+    { id: "gelu", label: "GELU", color: "#6f58c9" },
+  ];
+  const xs = Array.from({ length: 241 }, (_, index) => -6 + index * 0.05);
+
+  return definitions.map((definition) => ({
+    ...definition,
+    points: xs.map((x) => ({
+      x: round(x, 3),
+      y: round(activationValue(definition.id, x, leakySlope), 4),
+      label: definition.id,
+    })),
+    derivativePoints: xs.map((x) => ({
+      x: round(x, 3),
+      y: round(activationDerivative(definition.id, x, leakySlope), 4),
+      label: definition.id,
+    })),
+    value: activationValue(definition.id, inputX, leakySlope),
+    derivative: activationDerivative(definition.id, inputX, leakySlope),
+  }));
+}
+
+function activationValue(kind: ActivationFunctionKey, x: number, leakySlope: number) {
+  if (kind === "sigmoid") {
+    return sigmoid(x);
+  }
+
+  if (kind === "relu") {
+    return Math.max(0, x);
+  }
+
+  if (kind === "leaky-relu") {
+    return x > 0 ? x : leakySlope * x;
+  }
+
+  return gelu(x);
+}
+
+function activationDerivative(kind: ActivationFunctionKey, x: number, leakySlope: number) {
+  if (kind === "sigmoid") {
+    const y = sigmoid(x);
+    return y * (1 - y);
+  }
+
+  if (kind === "relu") {
+    return x > 0 ? 1 : 0;
+  }
+
+  if (kind === "leaky-relu") {
+    return x > 0 ? 1 : leakySlope;
+  }
+
+  return geluDerivative(x);
+}
+
+function gelu(x: number) {
+  const u = Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3);
+  return 0.5 * x * (1 + Math.tanh(u));
+}
+
+function geluDerivative(x: number) {
+  const u = Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3);
+  const tanh = Math.tanh(u);
+  const du = Math.sqrt(2 / Math.PI) * (1 + 3 * 0.044715 * x ** 2);
+  return 0.5 * (1 + tanh) + 0.5 * x * (1 - tanh ** 2) * du;
+}
+
+function makeActivationNeurons(
+  selected: ActivationFunctionKey,
+  negativeShift: number,
+  learningRate: number,
+  leakySlope: number,
+): ActivationNeuronState[] {
+  const highStepPenalty = Math.max(0, learningRate - 0.72) * 2.8;
+  const deathZone = selected === "relu" && (negativeShift < -1.25 || learningRate > 0.78);
+
+  return Array.from({ length: 8 }, (_, index) => {
+    const preActivation = negativeShift + (index - 3.5) * 0.52 - highStepPenalty;
+    const activation = activationValue(selected, preActivation, leakySlope);
+    const derivative = activationDerivative(selected, preActivation, leakySlope);
+    let status: ActivationNeuronState["status"] = derivative > 0.08 ? "alive" : "inactive";
+
+    if (selected === "relu" && preActivation <= 0) {
+      status = deathZone ? "dead" : "inactive";
+    } else if ((selected === "leaky-relu" || selected === "gelu") && preActivation < 0) {
+      status = "recovering";
+    } else if (selected === "sigmoid" && derivative < 0.035) {
+      status = "saturated";
+    }
+
+    return {
+      id: `activation-h${index}`,
+      index,
+      label: `h${index + 1}`,
+      preActivation: round(preActivation, 4),
+      activation: round(activation, 4),
+      derivative: round(derivative, 4),
+      status,
+    };
+  });
+}
+
 const backpropagationFromScratch = makeConceptAlgorithm({
   id: "backpropagation-from-scratch",
   name: "Backpropagation from Scratch",
@@ -1796,5 +2112,6 @@ export const categoryDemos: AlgorithmDefinition[] = [
   timeSeries,
   neuralNetwork,
   multiLayerNetwork,
+  activationFunctions,
   backpropagationFromScratch,
 ];

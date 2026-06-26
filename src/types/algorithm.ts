@@ -16,6 +16,7 @@ export const algorithmCategories = [
   "Time Series Fundamentals",
   "Neural Networks",
   "Multi-Layer Networks",
+  "Activation Functions — ReLU, Sigmoid, GELU",
   "Backpropagation from scratch",
 ] as const;
 
@@ -219,6 +220,42 @@ export type BackpropState = {
   formulas: BackpropFormulaValue[];
 };
 
+export type ActivationFunctionKey = "sigmoid" | "relu" | "leaky-relu" | "gelu";
+
+export type ActivationCurve = {
+  id: ActivationFunctionKey;
+  label: string;
+  color: string;
+  points: DataPoint[];
+  derivativePoints: DataPoint[];
+  value: number;
+  derivative: number;
+};
+
+export type ActivationNeuronState = {
+  id: string;
+  index: number;
+  label: string;
+  preActivation: number;
+  activation: number;
+  derivative: number;
+  status: "alive" | "recovering" | "inactive" | "dead" | "saturated";
+};
+
+export type ActivationState = {
+  selected: ActivationFunctionKey;
+  inputX: number;
+  targetX: number;
+  learningRate: number;
+  negativeShift: number;
+  leakySlope: number;
+  curves: ActivationCurve[];
+  neurons: ActivationNeuronState[];
+  deadCount: number;
+  saturatedCount: number;
+  recoveryCount: number;
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -229,6 +266,7 @@ export type ConceptFrame = {
   network?: NetworkGraph;
   heatmap?: HeatmapCell[];
   backprop?: BackpropState;
+  activation?: ActivationState;
   summary: string;
 };
 

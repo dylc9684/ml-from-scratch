@@ -1,6 +1,9 @@
 import * as d3 from "d3";
 import { useEffect, useRef, useState } from "react";
 import type {
+  ActivationCurve,
+  ActivationFunctionKey,
+  ActivationNeuronState,
   AlgorithmDefinition,
   AlgorithmFrame,
   ConceptFrame,
@@ -25,6 +28,7 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 820, height: 520 });
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
+  const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -55,7 +59,9 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
 
   return (
     <section
-      className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""}`}
+      className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""} ${
+        isActivationLesson ? "activation-shell" : ""
+      }`}
       aria-label={`${algorithm.name} visualization`}
     >
       <canvas ref={canvasRef} />
@@ -95,6 +101,11 @@ function draw(
 
   if (!frame || frame.points.length === 0) {
     paintEmpty(context, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.activation) {
+    paintActivationLesson(context, frame, size);
     return;
   }
 
@@ -342,6 +353,336 @@ function paintNetworkBoundaryLesson(
     y: plotPane.y + header,
     height: plotPane.height - header,
   });
+}
+
+function paintActivationLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const activation = frame.activation;
+  if (!activation) {
+    return;
+  }
+
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  const plotWidth = narrow ? size.width - padding * 2 : Math.max(360, size.width * 0.6);
+  const plotHeight = narrow ? 190 : Math.max(185, (size.height - 112) / 2);
+  const functionPane = {
+    x: padding,
+    y: 52,
+    width: plotWidth,
+    height: plotHeight,
+  };
+  const derivativePane = {
+    x: padding,
+    y: functionPane.y + functionPane.height + gap + 26,
+    width: plotWidth,
+    height: plotHeight,
+  };
+  const neuronPane = narrow
+    ? {
+        x: padding,
+        y: derivativePane.y + derivativePane.height + gap + 26,
+        width: size.width - padding * 2,
+        height: Math.max(190, size.height - derivativePane.y - derivativePane.height - gap - 48),
+      }
+    : {
+        x: functionPane.x + functionPane.width + gap,
+        y: 52,
+        width: size.width - functionPane.x - functionPane.width - gap - padding,
+        height: size.height - 92,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Interactive function plotter", functionPane.x, functionPane.y - 24);
+  context.fillText("Derivative curve", derivativePane.x, derivativePane.y - 24);
+  context.fillText("Neuron death lab", neuronPane.x, neuronPane.y - 24);
+
+  paintActivationPlot(context, activation.curves, activation.selected, activation.inputX, "value", functionPane);
+  paintActivationPlot(context, activation.curves, activation.selected, activation.inputX, "derivative", derivativePane);
+  paintActivationNeuronPane(context, activation.neurons, activation.selected, activation, neuronPane);
+}
+
+function paintActivationPlot(
+  context: CanvasRenderingContext2D,
+  curves: ActivationCurve[],
+  selected: ActivationFunctionKey,
+  inputX: number,
+  mode: "value" | "derivative",
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  const activeCurve = curves.find((curve) => curve.id === selected) ?? curves[0];
+  const yDomain = mode === "value" ? [-1.05, 6.15] : [-0.2, 1.25];
+  const margin = { top: 18, right: 14, bottom: 30, left: 40 };
+  const plot = {
+    x: pane.x + margin.left,
+    y: pane.y + margin.top,
+    width: Math.max(120, pane.width - margin.left - margin.right),
+    height: Math.max(90, pane.height - margin.top - margin.bottom),
+  };
+  const xScale = d3.scaleLinear().domain([-6, 6]).range([plot.x, plot.x + plot.width]);
+  const yScale = d3.scaleLinear().domain(yDomain).range([plot.y + plot.height, plot.y]);
+
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.strokeStyle = "rgba(97, 112, 127, 0.18)";
+  context.lineWidth = 1;
+  [-4, -2, 0, 2, 4].forEach((tick) => {
+    context.beginPath();
+    context.moveTo(xScale(tick), plot.y);
+    context.lineTo(xScale(tick), plot.y + plot.height);
+    context.stroke();
+  });
+  yScale.ticks(4).forEach((tick) => {
+    context.beginPath();
+    context.moveTo(plot.x, yScale(tick));
+    context.lineTo(plot.x + plot.width, yScale(tick));
+    context.stroke();
+  });
+
+  context.strokeStyle = "#aebbc5";
+  context.lineWidth = 1.2;
+  context.beginPath();
+  context.moveTo(plot.x, yScale(0));
+  context.lineTo(plot.x + plot.width, yScale(0));
+  context.moveTo(xScale(0), plot.y);
+  context.lineTo(xScale(0), plot.y + plot.height);
+  context.stroke();
+
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+
+  curves.forEach((curve) => {
+    const points = mode === "value" ? curve.points : curve.derivativePoints;
+    context.save();
+    context.globalAlpha = curve.id === selected ? 0.95 : 0.28;
+    context.strokeStyle = curve.color;
+    context.lineWidth = curve.id === selected ? 3 : 1.7;
+    context.beginPath();
+    points.forEach((point, index) => {
+      const x = xScale(point.x);
+      const y = yScale(point.y);
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.stroke();
+    context.restore();
+  });
+
+  const activeY = mode === "value" ? activeCurve.value : activeCurve.derivative;
+  const dotX = xScale(inputX);
+  const dotY = yScale(activeY);
+  context.strokeStyle = "rgba(23, 33, 43, 0.26)";
+  context.lineWidth = 1;
+  context.setLineDash([5, 5]);
+  context.beginPath();
+  context.moveTo(dotX, plot.y);
+  context.lineTo(dotX, plot.y + plot.height);
+  context.stroke();
+  context.setLineDash([]);
+
+  context.save();
+  context.shadowBlur = 14;
+  context.shadowColor = activeCurve.color;
+  context.fillStyle = activeCurve.color;
+  context.beginPath();
+  context.arc(dotX, dotY, 6.5, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+  context.restore();
+
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  [-6, -3, 0, 3, 6].forEach((tick) => {
+    context.fillText(String(tick), xScale(tick), plot.y + plot.height + 18);
+  });
+  context.textAlign = "right";
+  yScale.ticks(4).forEach((tick) => {
+    context.fillText(tick.toFixed(mode === "value" ? 0 : 1), plot.x - 8, yScale(tick) + 3);
+  });
+
+  context.textAlign = "left";
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  const valueLabel = mode === "value" ? "f" : "f'";
+  context.fillText(
+    `${activeCurve.label} ${valueLabel}(${inputX.toFixed(2)})=${activeY.toFixed(3)}`,
+    pane.x + 12,
+    pane.y + 16,
+  );
+
+  let legendX = pane.x + 12;
+  const legendY = pane.y + pane.height - 8;
+  curves.forEach((curve) => {
+    context.fillStyle = curve.color;
+    context.fillRect(legendX, legendY - 8, 10, 3);
+    context.fillStyle = curve.id === selected ? "#17212b" : "#61707f";
+    context.font = curve.id === selected ? "900 10px Inter, system-ui, sans-serif" : "700 10px Inter, system-ui, sans-serif";
+    context.fillText(curve.label, legendX + 14, legendY - 5);
+    legendX += Math.min(92, Math.max(64, context.measureText(curve.label).width + 28));
+  });
+}
+
+function paintActivationNeuronPane(
+  context: CanvasRenderingContext2D,
+  neurons: ActivationNeuronState[],
+  selected: ActivationFunctionKey,
+  activation: NonNullable<ConceptFrame["activation"]>,
+  pane: { x: number; y: number; width: number; height: number },
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  const label = activationLabel(selected);
+  const subtitle =
+    selected === "relu"
+      ? `${activation.deadCount} dead zero-gradient units`
+      : selected === "sigmoid"
+        ? `${activation.saturatedCount} saturated low-gradient units`
+        : `${activation.recoveryCount} negative units still learning`;
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `${subtitle} · shift ${activation.negativeShift.toFixed(1)} · lr ${activation.learningRate.toFixed(2)}`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const graph = {
+    x: pane.x + 20,
+    y: pane.y + 66,
+    width: pane.width - 40,
+    height: Math.max(120, pane.height - 88),
+  };
+  const inputX = graph.x + 14;
+  const hiddenX = graph.x + graph.width * 0.52;
+  const outputX = graph.x + graph.width - 18;
+  const inputYs = [graph.y + graph.height * 0.24, graph.y + graph.height * 0.5, graph.y + graph.height * 0.76];
+  const outputY = graph.y + graph.height * 0.5;
+  const hiddenYs = neurons.map((_, index) =>
+    neurons.length === 1
+      ? graph.y + graph.height / 2
+      : graph.y + (index / (neurons.length - 1)) * graph.height,
+  );
+
+  context.strokeStyle = "rgba(97, 112, 127, 0.17)";
+  context.lineWidth = 1;
+  inputYs.forEach((y) => {
+    hiddenYs.forEach((hiddenY) => {
+      context.beginPath();
+      context.moveTo(inputX, y);
+      context.lineTo(hiddenX, hiddenY);
+      context.stroke();
+    });
+  });
+  hiddenYs.forEach((hiddenY) => {
+    context.beginPath();
+    context.moveTo(hiddenX, hiddenY);
+    context.lineTo(outputX, outputY);
+    context.stroke();
+  });
+
+  inputYs.forEach((y, index) => {
+    paintActivationNode(context, inputX, y, `x${index + 1}`, "#2f6fbe", "#ffffff");
+  });
+  paintActivationNode(context, outputX, outputY, "y", "#17212b", "#ffffff");
+
+  neurons.forEach((neuron, index) => {
+    const y = hiddenYs[index];
+    const color = neuronStatusColor(neuron.status);
+    paintActivationNode(context, hiddenX, y, neuron.label, color, neuron.status === "dead" ? "#fff5f5" : "#ffffff");
+
+    const textX = hiddenX + 22;
+    context.fillStyle = color;
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(neuron.status, textX, y - 3);
+    context.fillStyle = "#61707f";
+    context.font = "700 9px Inter, system-ui, sans-serif";
+    context.fillText(`z=${neuron.preActivation.toFixed(2)}  grad=${neuron.derivative.toFixed(3)}`, textX, y + 10);
+  });
+
+  context.restore();
+}
+
+function paintActivationNode(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  label: string,
+  color: string,
+  fill: string,
+) {
+  context.beginPath();
+  context.fillStyle = fill;
+  context.strokeStyle = color;
+  context.lineWidth = 2.2;
+  context.arc(x, y, 13, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.fillStyle = "#17212b";
+  context.font = "900 9px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(label, x, y + 3);
+}
+
+function neuronStatusColor(status: ActivationNeuronState["status"]) {
+  if (status === "dead") {
+    return "#d34a43";
+  }
+
+  if (status === "recovering") {
+    return "#0f766e";
+  }
+
+  if (status === "saturated") {
+    return "#b7791f";
+  }
+
+  if (status === "inactive") {
+    return "#8a98a5";
+  }
+
+  return "#2f6fbe";
+}
+
+function activationLabel(selected: ActivationFunctionKey) {
+  if (selected === "leaky-relu") {
+    return "LeakyReLU";
+  }
+
+  if (selected === "relu") {
+    return "ReLU";
+  }
+
+  if (selected === "gelu") {
+    return "GELU";
+  }
+
+  return "Sigmoid";
 }
 
 function paintBackpropLesson(

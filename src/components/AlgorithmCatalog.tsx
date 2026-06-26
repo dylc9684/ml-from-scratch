@@ -124,6 +124,8 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Time Series Fundamentals": "Trend, seasonality, lag features, and forecasting.",
   "Neural Networks": "Layered differentiable models trained by backpropagation.",
   "Multi-Layer Networks": "Deep feed-forward topologies with stacked hidden layers.",
+  "Activation Functions — ReLU, Sigmoid, GELU":
+    "Nonlinearities, gradients, saturation, and dying-neuron behavior.",
   "Backpropagation from scratch":
     "Forward activations, backward deltas, and gradient updates by hand.",
 };
