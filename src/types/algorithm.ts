@@ -19,6 +19,7 @@ export const algorithmCategories = [
   "Activation Functions — ReLU, Sigmoid, GELU",
   "Loss Functions — MSE, Cross-Entropy, Contrastive",
   "SGD, Momentum, Adam, AdamW",
+  "Build a Mini-Framework",
   "Backpropagation from scratch",
 ] as const;
 
@@ -337,6 +338,37 @@ export type OptimizerState = {
   adaptiveWeights: AdaptiveWeightState[];
 };
 
+export type FrameworkLayerKind = "input" | "linear" | "activation" | "dropout" | "loss";
+
+export type FrameworkFlowPhase = "forward" | "backward";
+
+export type FrameworkLayerState = {
+  id: string;
+  kind: FrameworkLayerKind;
+  label: string;
+  units: number;
+  activation?: string;
+  parameters: number;
+  cacheShape?: string;
+  gradientShape?: string;
+};
+
+export type FrameworkFlowEvent = {
+  phase: FrameworkFlowPhase;
+  layerIndex: number;
+  progress: number;
+  description: string;
+};
+
+export type FrameworkState = {
+  layers: FrameworkLayerState[];
+  event: FrameworkFlowEvent;
+  totalParameters: number;
+  batchSize: number;
+  learningRate: number;
+  loss: number;
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -350,6 +382,7 @@ export type ConceptFrame = {
   activation?: ActivationState;
   loss?: LossState;
   optimizer?: OptimizerState;
+  framework?: FrameworkState;
   summary: string;
 };
 

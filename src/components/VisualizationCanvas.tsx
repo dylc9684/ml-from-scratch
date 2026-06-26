@@ -28,6 +28,13 @@ type Size = {
   height: number;
 };
 
+type CanvasPane = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export function VisualizationCanvas({ frame, algorithm }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 820, height: 520 });
@@ -35,6 +42,7 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
   const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);
   const isOptimizerLesson = frame?.type === "concept-demo" && Boolean(frame.optimizer);
+  const isFrameworkLesson = frame?.type === "concept-demo" && Boolean(frame.framework);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -67,7 +75,9 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
     <section
       className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""} ${
         isActivationLesson ? "activation-shell" : ""
-      } ${isLossLesson ? "loss-shell" : ""} ${isOptimizerLesson ? "optimizer-shell" : ""}`}
+      } ${isLossLesson ? "loss-shell" : ""} ${isOptimizerLesson ? "optimizer-shell" : ""} ${
+        isFrameworkLesson ? "framework-shell" : ""
+      }`}
       aria-label={`${algorithm.name} visualization`}
     >
       <canvas ref={canvasRef} />
@@ -122,6 +132,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.optimizer) {
     paintOptimizerLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.framework) {
+    paintFrameworkLesson(context, frame, size);
     return;
   }
 
@@ -1455,6 +1470,498 @@ function adaptiveRateColor(rateRatio: number) {
   const b = Math.round(compressed.b + (free.b - compressed.b) * clamped);
 
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function paintFrameworkLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const framework = frame.framework;
+  if (!framework) {
+    return;
+  }
+
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  const builderHeight = narrow
+    ? Math.max(390, Math.min(430, size.height * 0.52))
+    : size.height - 96;
+  const builderPane = narrow
+    ? {
+        x: padding,
+        y: 52,
+        width: size.width - padding * 2,
+        height: builderHeight,
+      }
+    : {
+        x: padding,
+        y: 58,
+        width: Math.max(430, size.width * 0.62),
+        height: builderHeight,
+      };
+  const trainerPane = narrow
+    ? {
+        x: padding,
+        y: builderPane.y + builderPane.height + gap + 26,
+        width: size.width - padding * 2,
+        height: Math.max(280, size.height - builderPane.y - builderPane.height - gap - 54),
+      }
+    : {
+        x: builderPane.x + builderPane.width + gap,
+        y: 58,
+        width: size.width - builderPane.x - builderPane.width - gap - padding,
+        height: size.height - 96,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Custom network builder", builderPane.x, builderPane.y - 24);
+  context.fillText("Trainer and class contract", trainerPane.x, trainerPane.y - 24);
+
+  paintFrameworkPipelinePane(context, framework, builderPane);
+  paintFrameworkTrainerPane(context, framework, trainerPane);
+}
+
+function paintFrameworkPipelinePane(
+  context: CanvasRenderingContext2D,
+  framework: NonNullable<ConceptFrame["framework"]>,
+  pane: CanvasPane,
+) {
+  const { layers, event } = framework;
+  const activeColor = event.phase === "forward" ? "#2f6fbe" : "#d34a43";
+  const rects = layoutFrameworkLayerRects(framework, pane);
+
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("network.layers[]", pane.x + 14, pane.y + 22);
+
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${layers.length} Layer instances · batch ${framework.batchSize} · lr ${framework.learningRate.toFixed(3)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  context.fillStyle = activeColor;
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText(`${event.phase.toUpperCase()} HOOK`, pane.x + 14, pane.y + 61);
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, event.description, pane.width - 120),
+    pane.x + 118,
+    pane.y + 61,
+  );
+
+  for (let index = 0; index < rects.length - 1; index += 1) {
+    const isActive =
+      (event.phase === "forward" && event.layerIndex === index + 1) ||
+      (event.phase === "backward" && event.layerIndex === index);
+    paintFrameworkConnector(context, rects[index], rects[index + 1], event.phase, isActive);
+  }
+
+  paintFrameworkPulse(context, framework, rects, pane);
+
+  layers.forEach((layer, index) => {
+    paintFrameworkLayerCard(context, layer, rects[index], index === event.layerIndex, event.phase);
+  });
+
+  const footerY = pane.y + pane.height - 36;
+  context.fillStyle = "#f7fafc";
+  context.strokeStyle = "#dce5ea";
+  context.fillRect(pane.x + 12, footerY, pane.width - 24, 24);
+  context.strokeRect(pane.x + 12, footerY, pane.width - 24, 24);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(context, "visual hooks fire inside every layer.forward() and layer.backward()", pane.width - 44),
+    pane.x + 22,
+    footerY + 16,
+  );
+
+  context.restore();
+}
+
+function layoutFrameworkLayerRects(
+  framework: NonNullable<ConceptFrame["framework"]>,
+  pane: CanvasPane,
+) {
+  const grid = {
+    x: pane.x + 14,
+    y: pane.y + 76,
+    width: pane.width - 28,
+    height: pane.height - 124,
+  };
+  const narrow = pane.width < 540;
+  const targetWidth = narrow ? 94 : 126;
+  const maxColumns = narrow ? 3 : 6;
+  const columns = Math.max(2, Math.min(maxColumns, Math.floor(grid.width / targetWidth) || 2));
+  const rows = Math.ceil(framework.layers.length / columns);
+  const gap = 10;
+  const cardWidth = (grid.width - gap * (columns - 1)) / columns;
+  const cardHeight = Math.max(34, Math.min(74, (grid.height - gap * (rows - 1)) / rows));
+
+  return framework.layers.map((_, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+
+    return {
+      x: grid.x + column * (cardWidth + gap),
+      y: grid.y + row * (cardHeight + gap),
+      width: cardWidth,
+      height: cardHeight,
+    };
+  });
+}
+
+function paintFrameworkConnector(
+  context: CanvasRenderingContext2D,
+  from: CanvasPane,
+  to: CanvasPane,
+  phase: NonNullable<ConceptFrame["framework"]>["event"]["phase"],
+  active: boolean,
+) {
+  const color = active ? (phase === "forward" ? "#2f6fbe" : "#d34a43") : "#c9d4da";
+  const start = { x: from.x + from.width, y: from.y + from.height / 2 };
+  const end = { x: to.x, y: to.y + to.height / 2 };
+
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = active ? 2.6 : 1.2;
+  context.globalAlpha = active ? 0.9 : 0.55;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+
+  if (Math.abs(start.y - end.y) < 2) {
+    context.lineTo(end.x, end.y);
+  } else {
+    const laneY = (from.y + from.height + to.y) / 2;
+    context.lineTo(start.x + 8, laneY);
+    context.lineTo(end.x - 8, laneY);
+    context.lineTo(end.x, end.y);
+  }
+
+  context.stroke();
+
+  const arrowX = active && phase === "backward" ? start.x : end.x;
+  const arrowY = active && phase === "backward" ? start.y : end.y;
+  const direction = active && phase === "backward" ? -1 : 1;
+  context.fillStyle = color;
+  context.beginPath();
+  context.moveTo(arrowX + direction * 5, arrowY);
+  context.lineTo(arrowX - direction * 4, arrowY - 4);
+  context.lineTo(arrowX - direction * 4, arrowY + 4);
+  context.closePath();
+  context.fill();
+  context.restore();
+}
+
+function paintFrameworkPulse(
+  context: CanvasRenderingContext2D,
+  framework: NonNullable<ConceptFrame["framework"]>,
+  rects: CanvasPane[],
+  pane: CanvasPane,
+) {
+  const event = framework.event;
+  const active = rects[event.layerIndex];
+  if (!active) {
+    return;
+  }
+
+  const activeCenter = {
+    x: active.x + active.width / 2,
+    y: active.y + active.height / 2,
+  };
+  let start = activeCenter;
+  let end = activeCenter;
+
+  if (event.phase === "forward") {
+    const previous = rects[event.layerIndex - 1];
+    start = previous
+      ? { x: previous.x + previous.width / 2, y: previous.y + previous.height / 2 }
+      : { x: pane.x + 16, y: activeCenter.y };
+    end = activeCenter;
+  } else {
+    const next = rects[event.layerIndex + 1];
+    start = next
+      ? { x: next.x + next.width / 2, y: next.y + next.height / 2 }
+      : { x: pane.x + pane.width - 16, y: activeCenter.y };
+    end = activeCenter;
+  }
+
+  const progress = 0.5 - Math.cos((event.progress % 1) * Math.PI) / 2;
+  const x = start.x + (end.x - start.x) * progress;
+  const y = start.y + (end.y - start.y) * progress;
+  const color = event.phase === "forward" ? "#2f6fbe" : "#d34a43";
+
+  context.save();
+  context.shadowBlur = 18;
+  context.shadowColor = color;
+  context.fillStyle = color;
+  context.globalAlpha = 0.92;
+  context.beginPath();
+  context.arc(x, y, 6.2, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 2;
+  context.stroke();
+  context.restore();
+}
+
+function paintFrameworkLayerCard(
+  context: CanvasRenderingContext2D,
+  layer: NonNullable<ConceptFrame["framework"]>["layers"][number],
+  rect: CanvasPane,
+  active: boolean,
+  phase: NonNullable<ConceptFrame["framework"]>["event"]["phase"],
+) {
+  const color = frameworkLayerColor(layer.kind);
+  const activeColor = phase === "forward" ? "#2f6fbe" : "#d34a43";
+  const compact = rect.height < 48 || rect.width < 106;
+
+  context.save();
+  if (active) {
+    context.shadowBlur = 12;
+    context.shadowColor = activeColor;
+  }
+  context.fillStyle = active
+    ? phase === "forward"
+      ? "rgba(47, 111, 190, 0.1)"
+      : "rgba(211, 74, 67, 0.1)"
+    : "#ffffff";
+  context.strokeStyle = active ? activeColor : "#d8e0e5";
+  context.lineWidth = active ? 2.2 : 1;
+  context.fillRect(rect.x, rect.y, rect.width, rect.height);
+  context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  context.shadowBlur = 0;
+
+  context.fillStyle = color;
+  context.fillRect(rect.x, rect.y, 4, rect.height);
+
+  context.fillStyle = "#17212b";
+  context.font = `${compact ? "800 9px" : "900 11px"} Inter, system-ui, sans-serif`;
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, layer.label, rect.width - 16), rect.x + 10, rect.y + (compact ? 15 : 18));
+
+  context.fillStyle = "#61707f";
+  context.font = `${compact ? "700 8px" : "700 9px"} Inter, system-ui, sans-serif`;
+  context.fillText(
+    fitCanvasText(context, `${frameworkKindLabel(layer.kind)} · ${layer.units} unit${layer.units === 1 ? "" : "s"}`, rect.width - 16),
+    rect.x + 10,
+    rect.y + (compact ? 28 : 34),
+  );
+
+  if (!compact) {
+    context.fillText(
+      fitCanvasText(context, `cache ${layer.cacheShape ?? "-"}`, rect.width - 16),
+      rect.x + 10,
+      rect.y + 48,
+    );
+  }
+
+  if (rect.height > 62) {
+    context.fillStyle = layer.parameters > 0 ? "#0f766e" : "#61707f";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.fillText(
+      layer.parameters > 0 ? `${layer.parameters.toLocaleString()} params` : layer.gradientShape ?? "stateless",
+      rect.x + 10,
+      rect.y + rect.height - 10,
+    );
+  }
+
+  context.restore();
+}
+
+function paintFrameworkTrainerPane(
+  context: CanvasRenderingContext2D,
+  framework: NonNullable<ConceptFrame["framework"]>,
+  pane: CanvasPane,
+) {
+  const activeColor = framework.event.phase === "forward" ? "#2f6fbe" : "#d34a43";
+
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Trainer.fit(model, loss, optimizer)", pane.x + 14, pane.y + 22);
+
+  context.fillStyle = activeColor;
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText(`loss ${framework.loss.toFixed(4)}`, pane.x + 14, pane.y + 42);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    `${framework.totalParameters.toLocaleString()} params · batch ${framework.batchSize}`,
+    pane.x + Math.min(128, pane.width * 0.42),
+    pane.y + 42,
+  );
+
+  const contractY = pane.y + pane.height - 76;
+  const loopTop = pane.y + 60;
+  const loopHeight = Math.max(132, contractY - loopTop - 14);
+  const stepGap = 6;
+  const stepHeight = Math.max(26, Math.min(38, (loopHeight - stepGap * 4) / 5));
+  const steps = [
+    {
+      label: "Batch",
+      detail: `X: ${framework.batchSize} x 2`,
+      active: framework.event.phase === "forward" && framework.event.layerIndex === 0,
+    },
+    {
+      label: "Sequential.forward",
+      detail: "loop layers left to right",
+      active: framework.event.phase === "forward" && framework.event.layerIndex > 0,
+    },
+    {
+      label: "Loss",
+      detail: "value and final gradient",
+      active: framework.event.layerIndex === framework.layers.length - 1,
+    },
+    {
+      label: "Sequential.backward",
+      detail: "reversed(layers)",
+      active: framework.event.phase === "backward",
+    },
+    {
+      label: "Optimizer.step",
+      detail: "apply stored dW and db",
+      active: framework.event.phase === "backward" && framework.event.layerIndex <= 1,
+    },
+  ];
+
+  steps.forEach((step, index) => {
+    const y = loopTop + index * (stepHeight + stepGap);
+    paintFrameworkLoopStep(context, step.label, step.detail, step.active, activeColor, {
+      x: pane.x + 14,
+      y,
+      width: pane.width - 28,
+      height: stepHeight,
+    });
+
+    if (index < steps.length - 1) {
+      context.strokeStyle = "#c9d4da";
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(pane.x + pane.width / 2, y + stepHeight);
+      context.lineTo(pane.x + pane.width / 2, y + stepHeight + stepGap);
+      context.stroke();
+    }
+  });
+
+  context.fillStyle = "#f7fafc";
+  context.strokeStyle = "#dce5ea";
+  context.fillRect(pane.x + 12, contractY, pane.width - 24, 62);
+  context.strokeRect(pane.x + 12, contractY, pane.width - 24, 62);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.fillText("Layer interface", pane.x + 22, contractY + 17);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, "forward(input_data): cache X, return Y", pane.width - 44),
+    pane.x + 22,
+    contractY + 35,
+  );
+  context.fillText(
+    fitCanvasText(context, "backward(output_gradient): update grads, return dL/dX", pane.width - 44),
+    pane.x + 22,
+    contractY + 51,
+  );
+
+  context.restore();
+}
+
+function paintFrameworkLoopStep(
+  context: CanvasRenderingContext2D,
+  label: string,
+  detail: string,
+  active: boolean,
+  activeColor: string,
+  rect: CanvasPane,
+) {
+  context.fillStyle = active ? "rgba(47, 111, 190, 0.08)" : "#ffffff";
+  if (activeColor === "#d34a43" && active) {
+    context.fillStyle = "rgba(211, 74, 67, 0.08)";
+  }
+  context.strokeStyle = active ? activeColor : "#dce5ea";
+  context.lineWidth = active ? 2 : 1;
+  context.fillRect(rect.x, rect.y, rect.width, rect.height);
+  context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+  context.fillStyle = active ? activeColor : "#17212b";
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, label, rect.width - 18), rect.x + 9, rect.y + 12);
+
+  if (rect.height > 30) {
+    context.fillStyle = "#61707f";
+    context.font = "700 9px Inter, system-ui, sans-serif";
+    context.fillText(fitCanvasText(context, detail, rect.width - 18), rect.x + 9, rect.y + 26);
+  }
+}
+
+function frameworkLayerColor(kind: NonNullable<ConceptFrame["framework"]>["layers"][number]["kind"]) {
+  if (kind === "input") {
+    return "#2f6fbe";
+  }
+
+  if (kind === "linear") {
+    return "#0f766e";
+  }
+
+  if (kind === "activation") {
+    return "#6f58c9";
+  }
+
+  if (kind === "dropout") {
+    return "#b7791f";
+  }
+
+  return "#d34a43";
+}
+
+function frameworkKindLabel(kind: NonNullable<ConceptFrame["framework"]>["layers"][number]["kind"]) {
+  if (kind === "input") {
+    return "input";
+  }
+
+  if (kind === "linear") {
+    return "Linear";
+  }
+
+  if (kind === "activation") {
+    return "activation";
+  }
+
+  if (kind === "dropout") {
+    return "Dropout";
+  }
+
+  return "loss";
 }
 
 function paintBackpropLesson(

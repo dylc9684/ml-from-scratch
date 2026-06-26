@@ -130,6 +130,8 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
     "Training objectives, loss curves, and metric-learning distances.",
   "SGD, Momentum, Adam, AdamW":
     "Optimizer trajectories, adaptive rates, momentum, and decoupled decay.",
+  "Build a Mini-Framework":
+    "Layer interfaces, Sequential containers, Trainer loops, and visual hooks.",
   "Backpropagation from scratch":
     "Forward activations, backward deltas, and gradient updates by hand.",
 };

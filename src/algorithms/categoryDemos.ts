@@ -18,6 +18,7 @@ import type {
   NormalizedDataset,
   OptimizerKey,
   ParameterState,
+  FrameworkLayerState,
 } from "../types/algorithm";
 
 const colors = ["#0f766e", "#2f6fbe", "#b7791f", "#d34a43", "#6f58c9", "#258f66"];
@@ -2357,6 +2358,384 @@ function makeAdaptiveOptimizerWeights(
   });
 }
 
+const miniFramework = makeConceptAlgorithm({
+  id: "mini-framework",
+  name: "Mini-Framework Builder",
+  category: "Build a Mini-Framework",
+  summary: "Builds a Sequential network from Layer objects and animates forward/backward hooks.",
+  parameters: [
+    {
+      kind: "stepper",
+      id: "hiddenLayers",
+      label: "Hidden layers",
+      min: 1,
+      max: 5,
+      step: 1,
+      defaultValue: 2,
+      format: "integer",
+    },
+    {
+      kind: "stepper",
+      id: "hiddenUnits",
+      label: "Hidden units",
+      min: 4,
+      max: 32,
+      step: 4,
+      defaultValue: 8,
+      format: "integer",
+    },
+    {
+      kind: "select",
+      id: "activation",
+      label: "Activation",
+      defaultValue: "GELU",
+      options: [
+        { label: "GELU", value: "GELU" },
+        { label: "ReLU", value: "ReLU" },
+        { label: "Tanh", value: "Tanh" },
+      ],
+    },
+    {
+      kind: "toggle",
+      id: "dropout",
+      label: "Add dropout masks",
+      defaultValue: false,
+    },
+    {
+      kind: "range",
+      id: "learningRate",
+      label: "Trainer learning rate",
+      min: 0.001,
+      max: 0.2,
+      step: 0.001,
+      defaultValue: 0.035,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "batchSize",
+      label: "Batch size",
+      min: 4,
+      max: 64,
+      step: 4,
+      defaultValue: 16,
+      format: "integer",
+    },
+    {
+      kind: "action",
+      id: "flowStep",
+      label: "Flow hook",
+      buttonLabel: "Step",
+      min: 0,
+      max: 999,
+      step: 1,
+      defaultValue: 0,
+      format: "integer",
+    },
+  ],
+  sample: makeFrameworkDataset,
+  formulas: [
+    { title: "Layer interface", expression: "\\operatorname{forward}(X)\\rightarrow Y,\\quad \\operatorname{backward}(\\partial L/\\partial Y)\\rightarrow \\partial L/\\partial X" },
+    { title: "Linear forward", expression: "Y=XW+b" },
+    { title: "Linear backward", expression: "\\frac{\\partial L}{\\partial X}=\\frac{\\partial L}{\\partial Y}W^T,\\quad \\frac{\\partial L}{\\partial W}=X^T\\frac{\\partial L}{\\partial Y}" },
+    { title: "Sequential backward", expression: "\\text{for layer in reversed(layers): } g=layer.backward(g)" },
+  ],
+  explanation: [
+    "A tiny deep-learning framework is mostly a contract: every layer exposes forward and backward methods.",
+    "Linear layers own parameters and gradients; activation and dropout layers cache enough state to transform gradients as they flow backward.",
+    "The Sequential container turns an array of objects into a trainable network, while the Trainer coordinates batches, loss, optimizer steps, and visual hooks.",
+  ],
+  engine: (_, params) => {
+    const hiddenLayers = Math.round(numberParam(params, "hiddenLayers", 2));
+    const hiddenUnits = Math.round(numberParam(params, "hiddenUnits", 8));
+    const activation = stringParam(params, "activation", "GELU");
+    const dropout = Boolean(params.dropout ?? false);
+    const learningRate = numberParam(params, "learningRate", 0.035);
+    const batchSize = Math.round(numberParam(params, "batchSize", 16));
+    const flowStep = Math.round(numberParam(params, "flowStep", 0));
+    const layers = makeFrameworkLayers(hiddenLayers, hiddenUnits, activation, dropout);
+    const flowEvents = makeFrameworkFlowEvents(layers);
+    const baseEventIndex = ((flowStep % flowEvents.length) + flowEvents.length) % flowEvents.length;
+    const frames = Array.from({ length: 24 }, (_, index) => {
+      const progress = index / 23;
+      const eventIndex = Math.min(flowEvents.length - 1, baseEventIndex + Math.floor(progress * 1.6));
+      const rawEvent = flowEvents[eventIndex % flowEvents.length];
+      const event = {
+        ...rawEvent,
+        progress,
+      };
+      const totalParameters = layers.reduce((total, layer) => total + layer.parameters, 0);
+      const loss = Math.max(0.018, 0.72 * Math.exp(-(flowStep + progress) * learningRate * 1.85));
+
+      return {
+        type: "concept-demo" as const,
+        iteration: flowStep + index + 1,
+        points: layers.map((layer, layerIndex) => ({ x: layerIndex, y: layer.units, label: layer.label })),
+        framework: {
+          layers,
+          event,
+          totalParameters,
+          batchSize,
+          learningRate,
+          loss,
+        },
+        summary: `${event.phase} · ${layers[event.layerIndex]?.label ?? "Trainer"} · ${totalParameters.toLocaleString()} params · loss ${loss.toFixed(3)}`,
+      };
+    });
+    const final = frames[frames.length - 1].framework;
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Layers", value: String(final.layers.length) },
+        { label: "Parameters", value: final.totalParameters.toLocaleString() },
+        { label: "Active hook", value: final.event.phase },
+        { label: "Loss", value: final.loss.toFixed(4) },
+      ],
+    };
+  },
+  python: () => `import numpy as np
+
+class Layer:
+    def forward(self, input_data):
+        raise NotImplementedError
+
+    def backward(self, output_gradient):
+        raise NotImplementedError
+
+class Linear(Layer):
+    def __init__(self, in_features, out_features, optimizer):
+        scale = np.sqrt(2 / in_features)
+        self.W = np.random.randn(in_features, out_features) * scale
+        self.b = np.zeros((1, out_features))
+        self.optimizer = optimizer
+
+    def forward(self, input_data):
+        self.X = input_data
+        return input_data @ self.W + self.b
+
+    def backward(self, output_gradient):
+        dX = output_gradient @ self.W.T
+        dW = self.X.T @ output_gradient
+        db = np.sum(output_gradient, axis=0, keepdims=True)
+        self.optimizer.update(self.W, dW)
+        self.optimizer.update(self.b, db)
+        return dX
+
+class ReLU(Layer):
+    def forward(self, input_data):
+        self.mask = input_data > 0
+        return np.maximum(0, input_data)
+
+    def backward(self, output_gradient):
+        return output_gradient * self.mask
+
+class Sequential(Layer):
+    def __init__(self, *layers):
+        self.layers = list(layers)
+
+    def forward(self, X):
+        for layer in self.layers:
+            X = layer.forward(X)
+        return X
+
+    def backward(self, gradient):
+        for layer in reversed(self.layers):
+            gradient = layer.backward(gradient)
+        return gradient
+
+class Trainer:
+    def __init__(self, model, loss, optimizer):
+        self.model = model
+        self.loss = loss
+        self.optimizer = optimizer
+
+    def fit(self, X, y, epochs=20):
+        for epoch in range(epochs):
+            y_hat = self.model.forward(X)
+            value, grad = self.loss(y_hat, y)
+            self.model.backward(grad)
+            self.optimizer.step()`,
+  javascript: (params) => `class Layer {
+  forward(inputData) {
+    throw new Error("forward() must be implemented");
+  }
+
+  backward(outputGradient) {
+    throw new Error("backward() must be implemented");
+  }
+}
+
+class Linear extends Layer {
+  constructor(inFeatures, outFeatures, optimizer) {
+    super();
+    this.W = randomMatrix(inFeatures, outFeatures, Math.sqrt(2 / inFeatures));
+    this.b = [new Array(outFeatures).fill(0)];
+    this.optimizer = optimizer;
+  }
+
+  forward(inputData) {
+    this.X = inputData;
+    return addBias(matMul(inputData, this.W), this.b);
+  }
+
+  backward(outputGradient) {
+    const dX = matMul(outputGradient, transpose(this.W));
+    const dW = matMul(transpose(this.X), outputGradient);
+    const db = sumRows(outputGradient);
+    this.optimizer.update(this.W, dW);
+    this.optimizer.update(this.b, db);
+    return dX;
+  }
+}
+
+class GELU extends Layer {
+  forward(inputData) {
+    this.X = inputData;
+    return inputData.map((row) => row.map(gelu));
+  }
+
+  backward(outputGradient) {
+    return outputGradient.map((row, r) =>
+      row.map((value, c) => value * geluGrad(this.X[r][c])),
+    );
+  }
+}
+
+class Sequential extends Layer {
+  constructor(layers = []) {
+    super();
+    this.layers = layers;
+  }
+
+  push(layer) {
+    this.layers.push(layer);
+  }
+
+  forward(X) {
+    return this.layers.reduce((value, layer) => layer.forward(value), X);
+  }
+
+  backward(gradient) {
+    return [...this.layers].reverse()
+      .reduce((value, layer) => layer.backward(value), gradient);
+  }
+}
+
+const network = new Sequential();
+network.push(new Linear(2, ${Math.round(numberParam(params, "hiddenUnits", 8))}, optimizer));
+network.push(new ${stringParam(params, "activation", "GELU")}());
+network.push(new Linear(${Math.round(numberParam(params, "hiddenUnits", 8))}, 1, optimizer));`,
+});
+
+function makeFrameworkDataset() {
+  return makeDataset(
+    "Mini-framework builder sample",
+    Array.from({ length: 10 }, (_, index) => ({
+      x: index,
+      y: index % 2 === 0 ? 1 : 0,
+      label: index % 2 === 0 ? "forward" : "backward",
+    })),
+  );
+}
+
+function makeFrameworkLayers(
+  hiddenLayers: number,
+  hiddenUnits: number,
+  activation: string,
+  dropout: boolean,
+): FrameworkLayerState[] {
+  const layers: FrameworkLayerState[] = [
+    {
+      id: "input",
+      kind: "input",
+      label: "Input X",
+      units: 2,
+      parameters: 0,
+      cacheShape: "batch x 2",
+      gradientShape: "batch x 2",
+    },
+  ];
+  let currentUnits = 2;
+
+  for (let hiddenIndex = 0; hiddenIndex < hiddenLayers; hiddenIndex += 1) {
+    layers.push({
+      id: `linear-${hiddenIndex}`,
+      kind: "linear",
+      label: `Linear ${currentUnits}->${hiddenUnits}`,
+      units: hiddenUnits,
+      parameters: currentUnits * hiddenUnits + hiddenUnits,
+      cacheShape: `batch x ${currentUnits}`,
+      gradientShape: `dW ${currentUnits}x${hiddenUnits}`,
+    });
+    layers.push({
+      id: `activation-${hiddenIndex}`,
+      kind: "activation",
+      label: activation,
+      units: hiddenUnits,
+      activation,
+      parameters: 0,
+      cacheShape: `z${hiddenIndex + 1}`,
+      gradientShape: `${activation}'(z)`,
+    });
+
+    if (dropout) {
+      layers.push({
+        id: `dropout-${hiddenIndex}`,
+        kind: "dropout",
+        label: "Dropout",
+        units: hiddenUnits,
+        parameters: 0,
+        cacheShape: "mask",
+        gradientShape: "mask * grad",
+      });
+    }
+
+    currentUnits = hiddenUnits;
+  }
+
+  layers.push({
+    id: "linear-output",
+    kind: "linear",
+    label: `Linear ${currentUnits}->1`,
+    units: 1,
+    parameters: currentUnits + 1,
+    cacheShape: `batch x ${currentUnits}`,
+    gradientShape: `dW ${currentUnits}x1`,
+  });
+  layers.push({
+    id: "loss",
+    kind: "loss",
+    label: "Loss",
+    units: 1,
+    parameters: 0,
+    cacheShape: "y_hat, y",
+    gradientShape: "dL/dy_hat",
+  });
+
+  return layers;
+}
+
+function makeFrameworkFlowEvents(layers: FrameworkLayerState[]) {
+  const forward = layers.map((layer, layerIndex) => ({
+    phase: "forward" as const,
+    layerIndex,
+    progress: 0,
+    description: `${layer.label}.forward(input_data)`,
+  }));
+  const backward = layers
+    .map((layer, layerIndex) => ({
+      phase: "backward" as const,
+      layerIndex,
+      progress: 0,
+      description: `${layer.label}.backward(output_gradient)`,
+    }))
+    .reverse();
+
+  return [...forward, ...backward];
+}
+
 const backpropagationFromScratch = makeConceptAlgorithm({
   id: "backpropagation-from-scratch",
   name: "Backpropagation from Scratch",
@@ -3024,5 +3403,6 @@ export const categoryDemos: AlgorithmDefinition[] = [
   activationFunctions,
   lossFunctions,
   optimizerRace,
+  miniFramework,
   backpropagationFromScratch,
 ];
