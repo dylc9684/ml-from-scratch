@@ -433,7 +433,8 @@ h1 {
 .visual-shell.framework-shell,
 .visual-shell.stochastic-shell,
 .visual-shell.svd-shell,
-.visual-shell.convex-shell {
+.visual-shell.convex-shell,
+.visual-shell.convolution-shell {
   min-height: 680px;
 }
 
@@ -458,7 +459,8 @@ h1 {
 .visual-shell.framework-shell canvas,
 .visual-shell.stochastic-shell canvas,
 .visual-shell.svd-shell canvas,
-.visual-shell.convex-shell canvas {
+.visual-shell.convex-shell canvas,
+.visual-shell.convolution-shell canvas {
   min-height: 680px;
 }
 
@@ -1027,7 +1029,9 @@ select {
   .visual-shell.svd-shell,
   .visual-shell.svd-shell canvas,
   .visual-shell.convex-shell,
-  .visual-shell.convex-shell canvas {
+  .visual-shell.convex-shell canvas,
+  .visual-shell.convolution-shell,
+  .visual-shell.convolution-shell canvas {
     min-height: 860px;
   }
 }

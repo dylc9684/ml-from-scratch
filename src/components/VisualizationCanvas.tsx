@@ -46,6 +46,7 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
   const isStochasticLesson = frame?.type === "concept-demo" && Boolean(frame.stochastic);
   const isSvdLesson = frame?.type === "concept-demo" && Boolean(frame.svd);
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
+  const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -86,6 +87,8 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
         isSvdLesson ? "svd-shell" : ""
       } ${
         isConvexLesson ? "convex-shell" : ""
+      } ${
+        isConvolutionLesson ? "convolution-shell" : ""
       }`}
       aria-label={`${algorithm.name} visualization`}
     >
@@ -161,6 +164,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.svd) {
     paintSvdLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.convolution) {
+    paintConvolutionLesson(context, frame, size);
     return;
   }
 
@@ -1494,6 +1502,329 @@ function adaptiveRateColor(rateRatio: number) {
   const b = Math.round(compressed.b + (free.b - compressed.b) * clamped);
 
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function paintConvolutionLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const convolution = frame.convolution;
+  if (!convolution) {
+    return;
+  }
+
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  let sourcePane: CanvasPane;
+  let outputPane: CanvasPane;
+  let mathPane: CanvasPane;
+
+  if (narrow) {
+    const sourceHeight = Math.min(310, Math.max(260, size.height * 0.34));
+    const outputHeight = Math.min(270, Math.max(230, size.height * 0.27));
+    sourcePane = {
+      x: padding,
+      y: 52,
+      width: size.width - padding * 2,
+      height: sourceHeight,
+    };
+    outputPane = {
+      x: padding,
+      y: sourcePane.y + sourcePane.height + gap + 26,
+      width: size.width - padding * 2,
+      height: outputHeight,
+    };
+    mathPane = {
+      x: padding,
+      y: outputPane.y + outputPane.height + gap + 26,
+      width: size.width - padding * 2,
+      height: Math.max(180, size.height - outputPane.y - outputPane.height - gap - 80),
+    };
+  } else {
+    const mathHeight = 124;
+    const mathY = size.height - mathHeight - 54;
+    const topHeight = Math.max(330, mathY - 96);
+    const paneWidth = (size.width - padding * 2 - gap) / 2;
+    sourcePane = {
+      x: padding,
+      y: 58,
+      width: paneWidth,
+      height: topHeight,
+    };
+    outputPane = {
+      x: sourcePane.x + sourcePane.width + gap,
+      y: 58,
+      width: paneWidth,
+      height: topHeight,
+    };
+    mathPane = {
+      x: padding,
+      y: mathY,
+      width: size.width - padding * 2,
+      height: mathHeight,
+    };
+  }
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Interactive filter sandbox", sourcePane.x, sourcePane.y - 24);
+  context.fillText("Filtered feature map", outputPane.x, outputPane.y - 24);
+  context.fillText("Element-wise calculation", mathPane.x, mathPane.y - 16);
+
+  paintConvolutionSourcePane(context, convolution, sourcePane);
+  paintConvolutionOutputPane(context, convolution, outputPane);
+  paintConvolutionMathPane(context, convolution, mathPane);
+}
+
+function paintConvolutionSourcePane(
+  context: CanvasRenderingContext2D,
+  convolution: NonNullable<ConceptFrame["convolution"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, convolution.source.name, pane.width - 28), pane.x + 14, pane.y + 22);
+
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${convolution.source.height}x${convolution.source.width} input · ${convolution.padding ? "zero padding visible" : "valid convolution"} · stride ${convolution.stride}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const imageBox = {
+    x: pane.x + 14,
+    y: pane.y + 58,
+    width: pane.width - 28,
+    height: pane.height - 72,
+  };
+  paintConvolutionMatrixImage(context, convolution.padded, imageBox, {
+    highlight: {
+      row: convolution.cursor.inputRow,
+      column: convolution.cursor.inputColumn,
+      size: 3,
+      color: "#f59e0b",
+    },
+    paddingCells: convolution.padding ? 1 : 0,
+  });
+  context.restore();
+}
+
+function paintConvolutionOutputPane(
+  context: CanvasRenderingContext2D,
+  convolution: NonNullable<ConceptFrame["convolution"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    `${convolution.outputShape.height}x${convolution.outputShape.width} feature map`,
+    pane.x + 14,
+    pane.y + 22,
+  );
+
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `current Y[${convolution.cursor.outputRow}, ${convolution.cursor.outputColumn}] = ${formatConvolutionCanvasNumber(convolution.currentValue)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const imageBox = {
+    x: pane.x + 14,
+    y: pane.y + 58,
+    width: pane.width - 28,
+    height: pane.height - 72,
+  };
+  paintConvolutionMatrixImage(context, convolution.normalizedOutput, imageBox, {
+    highlight: {
+      row: convolution.cursor.outputRow,
+      column: convolution.cursor.outputColumn,
+      size: 1,
+      color: "#2f6fbe",
+    },
+  });
+  context.restore();
+}
+
+function paintConvolutionMatrixImage(
+  context: CanvasRenderingContext2D,
+  matrix: number[][],
+  box: CanvasPane,
+  options: {
+    highlight?: { row: number; column: number; size: number; color: string };
+    paddingCells?: number;
+  } = {},
+) {
+  const rows = matrix.length;
+  const columns = matrix[0]?.length ?? 0;
+  if (rows === 0 || columns === 0) {
+    return;
+  }
+
+  context.fillStyle = "#f7fafc";
+  context.strokeStyle = "#dce5ea";
+  context.fillRect(box.x, box.y, box.width, box.height);
+  context.strokeRect(box.x, box.y, box.width, box.height);
+
+  const cellSize = Math.min((box.width - 12) / columns, (box.height - 12) / rows);
+  const imageWidth = columns * cellSize;
+  const imageHeight = rows * cellSize;
+  const imageX = box.x + (box.width - imageWidth) / 2;
+  const imageY = box.y + (box.height - imageHeight) / 2;
+  const paddingCells = options.paddingCells ?? 0;
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const value = Math.max(0, Math.min(1, matrix[row][column]));
+      const shade = Math.round(value * 255);
+      const isPadding =
+        paddingCells > 0 &&
+        (row < paddingCells ||
+          column < paddingCells ||
+          row >= rows - paddingCells ||
+          column >= columns - paddingCells);
+      context.fillStyle = isPadding ? "#cfd8df" : `rgb(${shade}, ${shade}, ${shade})`;
+      context.fillRect(
+        imageX + column * cellSize,
+        imageY + row * cellSize,
+        Math.ceil(cellSize),
+        Math.ceil(cellSize),
+      );
+      if (cellSize >= 8) {
+        context.strokeStyle = isPadding ? "rgba(97, 112, 127, 0.22)" : "rgba(23, 33, 43, 0.08)";
+        context.lineWidth = 0.5;
+        context.strokeRect(imageX + column * cellSize, imageY + row * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  const highlight = options.highlight;
+  if (highlight) {
+    const x = imageX + highlight.column * cellSize;
+    const y = imageY + highlight.row * cellSize;
+    const size = highlight.size * cellSize;
+    context.save();
+    context.fillStyle = "rgba(245, 158, 11, 0.12)";
+    context.strokeStyle = highlight.color;
+    context.shadowColor = "rgba(245, 158, 11, 0.38)";
+    context.shadowBlur = 10;
+    context.lineWidth = Math.max(2, Math.min(5, cellSize * 0.18));
+    context.fillRect(x, y, size, size);
+    context.strokeRect(x + 1, y + 1, size - 2, size - 2);
+    context.restore();
+  }
+}
+
+function paintConvolutionMathPane(
+  context: CanvasRenderingContext2D,
+  convolution: NonNullable<ConceptFrame["convolution"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.84)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  const gridSize = Math.min(128, Math.max(78, pane.height - 42), pane.width * 0.34);
+  const cell = gridSize / 3;
+  const gridX = pane.x + 14;
+  const gridY = pane.y + 24;
+
+  convolution.terms.forEach((term) => {
+    const x = gridX + term.column * cell;
+    const y = gridY + term.row * cell;
+    context.fillStyle = term.product >= 0 ? "#e7f6f2" : "#fff1ed";
+    context.strokeStyle = term.product >= 0 ? "rgba(15, 118, 110, 0.28)" : "rgba(211, 74, 67, 0.28)";
+    context.fillRect(x, y, cell, cell);
+    context.strokeRect(x, y, cell, cell);
+
+    context.fillStyle = "#17212b";
+    context.font = "800 8px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(
+      fitCanvasText(
+        context,
+        `${formatConvolutionCanvasNumber(term.imageValue)}x${formatConvolutionCanvasNumber(term.kernelValue)}`,
+        cell - 4,
+      ),
+      x + cell / 2,
+      y + cell / 2 - 2,
+    );
+    context.fillStyle = term.product >= 0 ? "#0b5f59" : "#b13a34";
+    context.fillText(
+      fitCanvasText(context, `=${formatConvolutionCanvasNumber(term.product)}`, cell - 4),
+      x + cell / 2,
+      y + cell / 2 + 10,
+    );
+  });
+
+  const textX = gridX + gridSize + 18;
+  const textWidth = pane.x + pane.width - textX - 14;
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `Y[${convolution.cursor.outputRow}, ${convolution.cursor.outputColumn}] = sum(patch * kernel)`,
+      textWidth,
+    ),
+    textX,
+    pane.y + 28,
+  );
+
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  const products = convolution.terms
+    .map((term) => formatConvolutionCanvasNumber(term.product))
+    .join(" + ")
+    .replace(/\+ -/g, "- ");
+  wrapCanvasText(context, products, textX, pane.y + 49, textWidth, 14, 3);
+
+  context.fillStyle = "#0f766e";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.fillText(`= ${formatConvolutionCanvasNumber(convolution.currentValue)}`, textX, pane.y + pane.height - 18);
+  context.restore();
+}
+
+function formatConvolutionCanvasNumber(value: number) {
+  if (Math.abs(value) < 0.005) {
+    return "0";
+  }
+  const digits = Math.abs(value) >= 10 ? 1 : 2;
+  return value.toFixed(digits).replace(/\.?0+$/, "");
 }
 
 function paintConvexLessonWebgl(

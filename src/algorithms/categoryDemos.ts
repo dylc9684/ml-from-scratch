@@ -8,6 +8,7 @@ import type {
   ConceptBar,
   ConceptFrame,
   ConceptSeries,
+  ConvolutionKernelPreset,
   ConvexOptimizerKey,
   ContrastivePair,
   ContrastivePoint,
@@ -42,6 +43,19 @@ function matrixParam(params: ParameterState, key: string, fallback: number[][]) 
     return fallbackRow.map((fallbackCell, columnIndex) => {
       const cell = Number(row[columnIndex]);
       return Number.isFinite(cell) ? Math.max(0, cell) : fallbackCell;
+    });
+  });
+}
+
+function signedMatrixParam(params: ParameterState, key: string, fallback: number[][]) {
+  const value = params[key];
+  const source = Array.isArray(value) ? value : fallback;
+
+  return fallback.map((fallbackRow, rowIndex) => {
+    const row = Array.isArray(source[rowIndex]) ? source[rowIndex] : fallbackRow;
+    return fallbackRow.map((fallbackCell, columnIndex) => {
+      const cell = Number(row[columnIndex]);
+      return Number.isFinite(cell) ? cell : fallbackCell;
     });
   });
 }
@@ -2103,6 +2117,400 @@ function approximateConstrainedOptimum(
 
 function optimizerLabel(optimizer: ConvexOptimizerKey) {
   return optimizer === "newton" ? "Newton" : "Projected GD";
+}
+
+const convolutionKernels: Record<ConvolutionKernelPreset, number[][]> = {
+  "sobel-x": [
+    [-1, 0, 1],
+    [-2, 0, 2],
+    [-1, 0, 1],
+  ],
+  "gaussian-blur": [
+    [1 / 16, 2 / 16, 1 / 16],
+    [2 / 16, 4 / 16, 2 / 16],
+    [1 / 16, 2 / 16, 1 / 16],
+  ],
+  sharpen: [
+    [0, -1, 0],
+    [-1, 5, -1],
+    [0, -1, 0],
+  ],
+  custom: [
+    [0, -1, 0],
+    [-1, 5, -1],
+    [0, -1, 0],
+  ],
+};
+
+const defaultConvolutionImage = makeDefaultConvolutionImage(28);
+
+const convolutionsFromScratch = makeConceptAlgorithm({
+  id: "convolutions-from-scratch",
+  name: "Convolutions from Scratch",
+  category: "Convolutions from Scratch",
+  summary: "Slides editable 3x3 kernels across grayscale images with padding, stride, and live arithmetic.",
+  parameters: [
+    {
+      kind: "image",
+      id: "convImage",
+      label: "Source image",
+      buttonLabel: "Upload image",
+      maxSize: 32,
+      defaultValue: defaultConvolutionImage,
+    },
+    {
+      kind: "select",
+      id: "kernelPreset",
+      label: "Kernel preset",
+      defaultValue: "sobel-x",
+      options: [
+        { label: "Sobel Filter", value: "sobel-x" },
+        { label: "Gaussian Blur", value: "gaussian-blur" },
+        { label: "Sharpen", value: "sharpen" },
+        { label: "Custom", value: "custom" },
+      ],
+    },
+    {
+      kind: "matrix",
+      id: "customKernel",
+      label: "Custom 3x3 kernel",
+      rowLabels: ["r1", "r2", "r3"],
+      columnLabels: ["c1", "c2", "c3"],
+      defaultValue: convolutionKernels.custom,
+      min: -5,
+      max: 5,
+      step: 0.0625,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "stride",
+      label: "Stride",
+      min: 1,
+      max: 3,
+      step: 1,
+      defaultValue: 1,
+      format: "integer",
+    },
+    {
+      kind: "toggle",
+      id: "padding",
+      label: "Zero padding",
+      defaultValue: true,
+    },
+  ],
+  sample: makeConvolutionDataset,
+  formulas: [
+    { title: "Convolution", expression: "Y_{i,j}=\\sum_{u=0}^{2}\\sum_{v=0}^{2}X_{iS+u,jS+v}K_{u,v}" },
+    { title: "Output shape", expression: "H_{out}=\\left\\lfloor\\frac{H+2P-K}{S}\\right\\rfloor+1" },
+    { title: "Sobel X filter", expression: "K=\\begin{bmatrix}-1&0&1\\\\-2&0&2\\\\-1&0&1\\end{bmatrix}" },
+  ],
+  explanation: [
+    "A convolution kernel is a tiny matrix that scans an image and writes one output pixel from the weighted sum of each local patch.",
+    "Stride controls how far the window jumps. Larger stride skips positions and visibly shrinks the feature map.",
+    "Padding adds a border of zeros so edge pixels can still become centers of a 3x3 calculation instead of being discarded.",
+  ],
+  engine: (_, params) => {
+    const source = imageMatrixParam(params, "convImage", defaultConvolutionImage);
+    const preset = convolutionPresetParam(params, "kernelPreset", "sobel-x");
+    const kernel =
+      preset === "custom"
+        ? signedMatrixParam(params, "customKernel", convolutionKernels.custom)
+        : convolutionKernels[preset];
+    const padding = Boolean(params.padding ?? true);
+    const stride = Math.max(1, Math.min(3, Math.round(numberParam(params, "stride", 1))));
+    const padded = padMatrix(source.values, padding ? 1 : 0);
+    const output = convolveMatrix(padded, kernel, stride);
+    const normalizedOutput = normalizeConvolutionOutput(output);
+    const positions = makeConvolutionPositions(output, stride);
+    const frameCount = Math.min(72, Math.max(1, positions.length));
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const sourceIndex = Math.min(
+        positions.length - 1,
+        Math.round((index / Math.max(1, frameCount - 1)) * (positions.length - 1)),
+      );
+      const position = positions[sourceIndex] ?? {
+        inputRow: 0,
+        inputColumn: 0,
+        outputRow: 0,
+        outputColumn: 0,
+      };
+      const patch = convolutionPatch(padded, position.inputRow, position.inputColumn);
+      const terms = convolutionTerms(patch, kernel);
+      const currentValue = terms.reduce((sum, term) => sum + term.product, 0);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: output.flatMap((row, rowIndex) =>
+          row.map((value, columnIndex) => ({
+            x: columnIndex,
+            y: rowIndex,
+            label: round(value, 3),
+          })),
+        ),
+        convolution: {
+          source,
+          kernelPreset: preset,
+          kernel,
+          padded,
+          output,
+          normalizedOutput,
+          padding,
+          stride,
+          cursor: position,
+          patch,
+          terms,
+          currentValue: round(currentValue, 4),
+          outputShape: {
+            height: output.length,
+            width: output[0]?.length ?? 0,
+          },
+        },
+        summary: `${convolutionKernelLabel(preset)} · stride ${stride} · padding ${padding ? "on" : "off"} · output ${output.length}x${output[0]?.length ?? 0}`,
+      };
+    });
+    const final = frames[frames.length - 1].convolution;
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Kernel", value: convolutionKernelLabel(preset) },
+        { label: "Stride", value: String(stride) },
+        { label: "Padding", value: padding ? "on" : "off" },
+        { label: "Output", value: `${final.outputShape.height}x${final.outputShape.width}` },
+      ],
+    };
+  },
+  python: (params) => {
+    const preset = convolutionPresetParam(params, "kernelPreset", "sobel-x");
+    const kernel =
+      preset === "custom"
+        ? signedMatrixParam(params, "customKernel", convolutionKernels.custom)
+        : convolutionKernels[preset];
+    const stride = Math.max(1, Math.min(3, Math.round(numberParam(params, "stride", 1))));
+    const padding = Boolean(params.padding ?? true) ? 1 : 0;
+
+    return `import numpy as np
+
+kernel = np.array(${formatMatrixLiteral(kernel)}, dtype=float)
+stride = ${stride}
+pad = ${padding}
+
+# image is a grayscale matrix with values in [0, 1].
+if pad:
+    image = np.pad(image, ((pad, pad), (pad, pad)), mode="constant")
+
+kh, kw = kernel.shape
+out_h = (image.shape[0] - kh) // stride + 1
+out_w = (image.shape[1] - kw) // stride + 1
+output = np.zeros((out_h, out_w))
+
+for i in range(out_h):
+    for j in range(out_w):
+        h = i * stride
+        w = j * stride
+        patch = image[h:h + kh, w:w + kw]
+        output[i, j] = np.sum(patch * kernel)`;
+  },
+  javascript: (params) => {
+    const preset = convolutionPresetParam(params, "kernelPreset", "sobel-x");
+    const kernel =
+      preset === "custom"
+        ? signedMatrixParam(params, "customKernel", convolutionKernels.custom)
+        : convolutionKernels[preset];
+    const stride = Math.max(1, Math.min(3, Math.round(numberParam(params, "stride", 1))));
+    const padding = Boolean(params.padding ?? true) ? 1 : 0;
+
+    return `const kernel = ${formatMatrixLiteral(kernel)};
+const stride = ${stride};
+const pad = ${padding};
+
+const padded = pad
+  ? padWithZeros(image, pad)
+  : image.map((row) => [...row]);
+const outH = Math.floor((padded.length - 3) / stride) + 1;
+const outW = Math.floor((padded[0].length - 3) / stride) + 1;
+const output = Array.from({ length: outH }, () => Array(outW).fill(0));
+
+for (let i = 0; i < outH; i += 1) {
+  for (let j = 0; j < outW; j += 1) {
+    const h = i * stride;
+    const w = j * stride;
+    let sum = 0;
+    for (let kh = 0; kh < 3; kh += 1) {
+      for (let kw = 0; kw < 3; kw += 1) {
+        sum += padded[h + kh][w + kw] * kernel[kh][kw];
+      }
+    }
+    output[i][j] = sum;
+  }
+}
+
+// TensorFlow.js path for hardware acceleration:
+// const x = tf.tensor4d(image, [1, height, width, 1]);
+// const k = tf.tensor4d(kernel.flat(), [3, 3, 1, 1]);
+// const y = tf.conv2d(x, k, stride, pad ? "same" : "valid");`;
+  },
+});
+
+function makeDefaultConvolutionImage(size: number): ImageMatrixParameterValue {
+  const values = Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, column) => {
+      const base = column > size * 0.52 ? 0.72 : 0.24;
+      const square =
+        column > size * 0.14 &&
+        column < size * 0.42 &&
+        row > size * 0.55 &&
+        row < size * 0.82
+          ? 0.48
+          : 0;
+      const bar = row > size * 0.2 && row < size * 0.32 ? 0.18 : 0;
+      const diagonal = Math.abs(row - column * 0.68 - size * 0.08) < 1.4 ? 0.22 : 0;
+      const ripple = Math.sin(row * 0.55) * Math.cos(column * 0.38) * 0.035;
+      return Math.max(0, Math.min(1, base + square + bar + diagonal + ripple));
+    }),
+  );
+
+  return {
+    kind: "image-matrix",
+    name: "Generated edge sample",
+    width: size,
+    height: size,
+    values,
+  };
+}
+
+function makeConvolutionDataset() {
+  return makeDataset(
+    "Generated convolution grid sample",
+    Array.from({ length: 32 }, (_, index) => ({
+      x: index % 8,
+      y: Math.floor(index / 8),
+      label: "pixel",
+    })),
+  );
+}
+
+function convolutionPresetParam(
+  params: ParameterState,
+  key: string,
+  fallback: ConvolutionKernelPreset,
+): ConvolutionKernelPreset {
+  const value = stringParam(params, key, fallback);
+  return value === "sobel-x" || value === "gaussian-blur" || value === "sharpen" || value === "custom"
+    ? value
+    : fallback;
+}
+
+function padMatrix(matrix: number[][], amount: number) {
+  if (amount <= 0) {
+    return matrix.map((row) => [...row]);
+  }
+
+  const width = matrix[0]?.length ?? 0;
+  const paddedWidth = width + amount * 2;
+  const zeros = () => Array.from({ length: paddedWidth }, () => 0);
+  const padded: number[][] = Array.from({ length: amount }, zeros);
+  matrix.forEach((row) => {
+    padded.push([
+      ...Array.from({ length: amount }, () => 0),
+      ...row,
+      ...Array.from({ length: amount }, () => 0),
+    ]);
+  });
+  padded.push(...Array.from({ length: amount }, zeros));
+  return padded;
+}
+
+function convolveMatrix(matrix: number[][], kernel: number[][], stride: number) {
+  const kernelHeight = kernel.length;
+  const kernelWidth = kernel[0]?.length ?? 0;
+  const outputHeight = Math.max(1, Math.floor((matrix.length - kernelHeight) / stride) + 1);
+  const outputWidth = Math.max(1, Math.floor(((matrix[0]?.length ?? 0) - kernelWidth) / stride) + 1);
+
+  return Array.from({ length: outputHeight }, (_, outputRow) =>
+    Array.from({ length: outputWidth }, (_, outputColumn) => {
+      const inputRow = outputRow * stride;
+      const inputColumn = outputColumn * stride;
+      let total = 0;
+      for (let kernelRow = 0; kernelRow < kernelHeight; kernelRow += 1) {
+        for (let kernelColumn = 0; kernelColumn < kernelWidth; kernelColumn += 1) {
+          total += (matrix[inputRow + kernelRow]?.[inputColumn + kernelColumn] ?? 0) * kernel[kernelRow][kernelColumn];
+        }
+      }
+      return round(total, 5);
+    }),
+  );
+}
+
+function makeConvolutionPositions(output: number[][], stride: number) {
+  return output.flatMap((row, outputRow) =>
+    row.map((_, outputColumn) => ({
+      inputRow: outputRow * stride,
+      inputColumn: outputColumn * stride,
+      outputRow,
+      outputColumn,
+    })),
+  );
+}
+
+function convolutionPatch(matrix: number[][], row: number, column: number) {
+  return Array.from({ length: 3 }, (_, patchRow) =>
+    Array.from({ length: 3 }, (_, patchColumn) => matrix[row + patchRow]?.[column + patchColumn] ?? 0),
+  );
+}
+
+function convolutionTerms(patch: number[][], kernel: number[][]) {
+  return patch.flatMap((row, rowIndex) =>
+    row.map((imageValue, columnIndex) => {
+      const kernelValue = kernel[rowIndex]?.[columnIndex] ?? 0;
+      return {
+        imageValue,
+        kernelValue,
+        product: round(imageValue * kernelValue, 5),
+        row: rowIndex,
+        column: columnIndex,
+      };
+    }),
+  );
+}
+
+function normalizeConvolutionOutput(matrix: number[][]) {
+  const values = matrix.flat();
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || Math.abs(max - min) < 1e-8) {
+    return matrix.map((row) => row.map(() => 0.5));
+  }
+
+  return matrix.map((row) => row.map((value) => (value - min) / (max - min)));
+}
+
+function convolutionKernelLabel(preset: ConvolutionKernelPreset) {
+  if (preset === "sobel-x") return "Sobel X";
+  if (preset === "gaussian-blur") return "Gaussian Blur";
+  if (preset === "sharpen") return "Sharpen";
+  return "Custom";
+}
+
+function formatMatrixLiteral(matrix: number[][]) {
+  return `[
+  ${matrix
+    .map((row) =>
+      `[${row
+        .map((value) =>
+          Math.abs(value) < 1e-8
+            ? "0"
+            : Number.isInteger(value)
+              ? String(value)
+              : Number(value.toFixed(4)).toString(),
+        )
+        .join(", ")}]`,
+    )
+    .join(",\n  ")}
+]`;
 }
 
 const neuralNetwork = makeConceptAlgorithm({
@@ -4594,6 +5002,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   stochasticProcesses,
   singularValueDecomposition,
   convexOptimization,
+  convolutionsFromScratch,
   neuralNetwork,
   multiLayerNetwork,
   activationFunctions,

@@ -17,6 +17,7 @@ export const algorithmCategories = [
   "Stochastic Processes",
   "Singular Value Decomposition",
   "Convex Optimization",
+  "Convolutions from Scratch",
   "Neural Networks",
   "Multi-Layer Networks",
   "Activation Functions — ReLU, Sigmoid, GELU",
@@ -516,6 +517,40 @@ export type ConvexState = {
   gradientNorm: number;
 };
 
+export type ConvolutionKernelPreset = "sobel-x" | "gaussian-blur" | "sharpen" | "custom";
+
+export type ConvolutionTerm = {
+  imageValue: number;
+  kernelValue: number;
+  product: number;
+  row: number;
+  column: number;
+};
+
+export type ConvolutionState = {
+  source: ImageMatrixParameterValue;
+  kernelPreset: ConvolutionKernelPreset;
+  kernel: MatrixParameterValue;
+  padded: MatrixParameterValue;
+  output: MatrixParameterValue;
+  normalizedOutput: MatrixParameterValue;
+  padding: boolean;
+  stride: number;
+  cursor: {
+    inputRow: number;
+    inputColumn: number;
+    outputRow: number;
+    outputColumn: number;
+  };
+  patch: MatrixParameterValue;
+  terms: ConvolutionTerm[];
+  currentValue: number;
+  outputShape: {
+    height: number;
+    width: number;
+  };
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -533,6 +568,7 @@ export type ConceptFrame = {
   stochastic?: StochasticState;
   svd?: SvdState;
   convex?: ConvexState;
+  convolution?: ConvolutionState;
   summary: string;
 };
 

@@ -125,6 +125,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Stochastic Processes": "Random walks, noise, transition matrices, and Markov chains.",
   "Singular Value Decomposition": "Low-rank image compression and geometric matrix factors.",
   "Convex Optimization": "Constrained bowls, projected steps, Hessians, and convexity checks.",
+  "Convolutions from Scratch": "Kernels, padding, stride, and image feature maps.",
   "Neural Networks": "Layered differentiable models trained by backpropagation.",
   "Multi-Layer Networks": "Deep feed-forward topologies with stacked hidden layers.",
   "Activation Functions — ReLU, Sigmoid, GELU":
