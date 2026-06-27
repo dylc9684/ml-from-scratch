@@ -73,6 +73,16 @@ export default function App() {
     setIsPlaying(result.frames.length > 1);
   }, [activeAlgorithm, dataset, params]);
 
+  const runWithParams = useCallback(
+    (nextParams: ParameterState) => {
+      const result = activeAlgorithm.engine(dataset, nextParams);
+      setEngineResult(result);
+      setFrameIndex(0);
+      setIsPlaying(result.frames.length > 1);
+    },
+    [activeAlgorithm, dataset],
+  );
+
   useEffect(() => {
     if (!autoRun) {
       return;
@@ -112,6 +122,20 @@ export default function App() {
       ...current,
       [key]: value,
     }));
+  };
+
+  const handleRunClick = () => {
+    if (activeAlgorithm.id === "dynamic-programming") {
+      const nextParams = {
+        ...params,
+        playSignal: Number(params.dpStep ?? 0) + 1,
+      };
+      setParams(nextParams);
+      runWithParams(nextParams);
+      return;
+    }
+
+    runAlgorithm();
   };
 
   const handleReset = () => {
@@ -191,9 +215,9 @@ export default function App() {
             <Sparkles size={17} aria-hidden="true" />
             Sample
           </button>
-          <button className="button primary" type="button" onClick={runAlgorithm}>
+          <button className="button primary" type="button" onClick={handleRunClick}>
             <Play size={17} aria-hidden="true" />
-            Run
+            {activeAlgorithm.id === "dynamic-programming" ? "Play" : "Run"}
           </button>
           <button
             className="icon-button"
@@ -232,7 +256,12 @@ export default function App() {
             </div>
           </div>
 
-          <VisualizationCanvas frame={currentFrame} algorithm={activeAlgorithm} />
+          <VisualizationCanvas
+            frame={currentFrame}
+            algorithm={activeAlgorithm}
+            params={params}
+            onParamChange={handleParamChange}
+          />
           <MetricsGrid metrics={engineResult.metrics} />
         </main>
 

@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import type {
   ActivationCurve,
   ActivationFunctionKey,
@@ -9,11 +9,16 @@ import type {
   ConceptFrame,
   ContrastivePair,
   DataPoint,
+  DynamicProgrammingAction,
+  GridWorldCell,
+  GridWorldValue,
   KMeansFrame,
   LinearRegressionFrame,
   LossFunctionKey,
   LossSurfaceKey,
   OptimizerRunnerState,
+  ParameterState,
+  ParameterValue,
 } from "../types/algorithm";
 
 const colors = ["#0f766e", "#2f6fbe", "#b7791f", "#d34a43", "#6f58c9", "#258f66"];
@@ -21,6 +26,8 @@ const colors = ["#0f766e", "#2f6fbe", "#b7791f", "#d34a43", "#6f58c9", "#258f66"
 type Props = {
   frame: AlgorithmFrame | null;
   algorithm: AlgorithmDefinition;
+  params?: ParameterState;
+  onParamChange?: (key: string, value: ParameterValue) => void;
 };
 
 type Size = {
@@ -35,7 +42,7 @@ type CanvasPane = {
   height: number;
 };
 
-export function VisualizationCanvas({ frame, algorithm }: Props) {
+export function VisualizationCanvas({ frame, algorithm, params, onParamChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 820, height: 520 });
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
@@ -47,6 +54,7 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
   const isSvdLesson = frame?.type === "concept-demo" && Boolean(frame.svd);
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
+  const isDynamicProgrammingLesson = frame?.type === "concept-demo" && Boolean(frame.dynamicProgramming);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,6 +83,36 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
     draw(canvas, size, frame);
   }, [frame, size]);
 
+  const handleCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (
+      frame?.type !== "concept-demo" ||
+      !frame.dynamicProgramming ||
+      !params ||
+      !onParamChange
+    ) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    const point = {
+      x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
+      y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
+    };
+    const hit = hitTestDynamicProgrammingGrid(frame.dynamicProgramming, size, point);
+    if (!hit) {
+      return;
+    }
+
+    const tool = gridWorldPaintTool(params.paintTool);
+    const nextGrid = paintGridWorldCell(frame.dynamicProgramming.grid, hit.row, hit.column, tool);
+    onParamChange("gridWorld", nextGrid);
+  };
+
   return (
     <section
       className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""} ${
@@ -89,10 +127,16 @@ export function VisualizationCanvas({ frame, algorithm }: Props) {
         isConvexLesson ? "convex-shell" : ""
       } ${
         isConvolutionLesson ? "convolution-shell" : ""
+      } ${
+        isDynamicProgrammingLesson ? "dynamic-programming-shell" : ""
       }`}
       aria-label={`${algorithm.name} visualization`}
     >
-      <canvas key={isConvexLesson ? "webgl-convex" : "canvas-2d"} ref={canvasRef} />
+      <canvas
+        key={isConvexLesson ? "webgl-convex" : "canvas-2d"}
+        ref={canvasRef}
+        onClick={handleCanvasClick}
+      />
       <div className="canvas-readout">
         {frame ? (
           <>
@@ -164,6 +208,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.svd) {
     paintSvdLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.dynamicProgramming) {
+    paintDynamicProgrammingLesson(context, frame, size);
     return;
   }
 
@@ -1502,6 +1551,385 @@ function adaptiveRateColor(rateRatio: number) {
   const b = Math.round(compressed.b + (free.b - compressed.b) * clamped);
 
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function paintDynamicProgrammingLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const dynamicProgramming = frame.dynamicProgramming;
+  if (!dynamicProgramming) {
+    return;
+  }
+
+  const layout = dynamicProgrammingLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Gridworld value matrix", layout.gridPane.x, layout.gridPane.y - 24);
+  context.fillText("Bellman update loop", layout.infoPane.x, layout.infoPane.y - 24);
+
+  paintDynamicProgrammingGrid(context, dynamicProgramming, layout.gridPane);
+  paintDynamicProgrammingBellmanPane(context, dynamicProgramming, layout.infoPane, frame.iteration);
+}
+
+function dynamicProgrammingLayout(size: Size) {
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  if (narrow) {
+    const gridHeight = Math.min(460, Math.max(330, size.height * 0.52));
+    return {
+      gridPane: {
+        x: padding,
+        y: 52,
+        width: size.width - padding * 2,
+        height: gridHeight,
+      },
+      infoPane: {
+        x: padding,
+        y: 52 + gridHeight + gap + 26,
+        width: size.width - padding * 2,
+        height: Math.max(260, size.height - 52 - gridHeight - gap - 82),
+      },
+    };
+  }
+
+  const gridWidth = Math.max(440, size.width * 0.62);
+  return {
+    gridPane: {
+      x: padding,
+      y: 58,
+      width: gridWidth,
+      height: size.height - 96,
+    },
+    infoPane: {
+      x: padding + gridWidth + gap,
+      y: 58,
+      width: size.width - padding * 2 - gridWidth - gap,
+      height: size.height - 96,
+    },
+  };
+}
+
+function dynamicProgrammingGridBox(
+  dynamicProgramming: NonNullable<ConceptFrame["dynamicProgramming"]>,
+  pane: CanvasPane,
+) {
+  const rows = dynamicProgramming.grid.rows;
+  const columns = dynamicProgramming.grid.columns;
+  const available = {
+    x: pane.x + 18,
+    y: pane.y + 62,
+    width: pane.width - 36,
+    height: pane.height - 84,
+  };
+  const cellSize = Math.min(available.width / columns, available.height / rows);
+  return {
+    x: available.x + (available.width - columns * cellSize) / 2,
+    y: available.y + (available.height - rows * cellSize) / 2,
+    width: columns * cellSize,
+    height: rows * cellSize,
+    cellSize,
+  };
+}
+
+function paintDynamicProgrammingGrid(
+  context: CanvasRenderingContext2D,
+  dynamicProgramming: NonNullable<ConceptFrame["dynamicProgramming"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`${dynamicProgrammingMethodLabel(dynamicProgramming.method)} sweep ${dynamicProgramming.sweep}`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `gamma ${dynamicProgramming.gamma.toFixed(2)} · delta ${dynamicProgramming.delta.toFixed(4)} · click cells with the selected paint tool`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const box = dynamicProgrammingGridBox(dynamicProgramming, pane);
+  const values = dynamicProgramming.values.flatMap((row, rowIndex) =>
+    row.filter((_, columnIndex) => dynamicProgramming.grid.cells[rowIndex][columnIndex] !== "wall"),
+  );
+  const positiveMax = Math.max(0.001, ...values.filter((value) => value > 0));
+  const negativeMin = Math.min(-0.001, ...values.filter((value) => value < 0));
+
+  for (let row = 0; row < dynamicProgramming.grid.rows; row += 1) {
+    for (let column = 0; column < dynamicProgramming.grid.columns; column += 1) {
+      const cell = dynamicProgramming.grid.cells[row][column];
+      const value = dynamicProgramming.values[row][column];
+      const x = box.x + column * box.cellSize;
+      const y = box.y + row * box.cellSize;
+      context.fillStyle = dynamicProgrammingCellColor(cell, value, positiveMax, negativeMin);
+      context.fillRect(x, y, box.cellSize, box.cellSize);
+      context.strokeStyle = "#ffffff";
+      context.lineWidth = 1.4;
+      context.strokeRect(x, y, box.cellSize, box.cellSize);
+
+      const active = dynamicProgramming.activeCell.row === row && dynamicProgramming.activeCell.column === column;
+      if (active) {
+        context.strokeStyle = "#2f6fbe";
+        context.lineWidth = Math.max(2, box.cellSize * 0.08);
+        context.strokeRect(x + 2, y + 2, box.cellSize - 4, box.cellSize - 4);
+      }
+
+      paintDynamicProgrammingCellText(context, cell, value, x, y, box.cellSize);
+    }
+  }
+
+  if (dynamicProgramming.stable) {
+    dynamicProgramming.policy.forEach((policyCell) => {
+      const x = box.x + policyCell.column * box.cellSize;
+      const y = box.y + policyCell.row * box.cellSize;
+      paintPolicyArrow(context, policyCell.action, x, y, box.cellSize, dynamicProgramming.sweep);
+    });
+  }
+
+  context.restore();
+}
+
+function paintDynamicProgrammingCellText(
+  context: CanvasRenderingContext2D,
+  cell: GridWorldCell,
+  value: number,
+  x: number,
+  y: number,
+  cellSize: number,
+) {
+  const label = cell === "wall" ? "WALL" : cell === "gold" ? "GOLD" : cell === "fire" ? "FIRE" : cell === "start" ? "START" : "";
+  context.textAlign = "center";
+  context.fillStyle = cell === "wall" ? "#f7fafc" : "#17212b";
+  const valueFontSize = Math.max(9, Math.min(17, cellSize * 0.24));
+  context.font = `900 ${valueFontSize}px Inter, system-ui, sans-serif`;
+  context.fillText(value.toFixed(Math.abs(value) >= 10 ? 0 : 1), x + cellSize / 2, y + cellSize / 2 + 5);
+  if (label && cellSize > 42) {
+    context.fillStyle = cell === "wall" ? "#cfd8df" : "#4d5c68";
+    context.font = "900 8px Inter, system-ui, sans-serif";
+    context.fillText(label, x + cellSize / 2, y + 13);
+  }
+}
+
+function paintPolicyArrow(
+  context: CanvasRenderingContext2D,
+  action: DynamicProgrammingAction,
+  x: number,
+  y: number,
+  cellSize: number,
+  iteration: number,
+) {
+  const direction: Record<DynamicProgrammingAction, [number, number]> = {
+    up: [0, -1],
+    right: [1, 0],
+    down: [0, 1],
+    left: [-1, 0],
+  };
+  const [dx, dy] = direction[action];
+  const pulse = 0.82 + Math.sin(iteration * 0.42) * 0.1;
+  const center = { x: x + cellSize / 2, y: y + cellSize / 2 };
+  const length = cellSize * 0.28 * pulse;
+  const end = { x: center.x + dx * length, y: center.y + dy * length };
+  const angle = Math.atan2(dy, dx);
+
+  context.save();
+  context.strokeStyle = "rgba(23, 33, 43, 0.76)";
+  context.fillStyle = "rgba(23, 33, 43, 0.76)";
+  context.lineWidth = Math.max(1.8, cellSize * 0.045);
+  context.beginPath();
+  context.moveTo(center.x - dx * cellSize * 0.12, center.y - dy * cellSize * 0.12);
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.translate(end.x, end.y);
+  context.rotate(angle);
+  const arrow = Math.max(5, cellSize * 0.11);
+  context.beginPath();
+  context.moveTo(arrow, 0);
+  context.lineTo(-arrow * 0.72, -arrow * 0.56);
+  context.lineTo(-arrow * 0.72, arrow * 0.56);
+  context.closePath();
+  context.fill();
+  context.restore();
+}
+
+function paintDynamicProgrammingBellmanPane(
+  context: CanvasRenderingContext2D,
+  dynamicProgramming: NonNullable<ConceptFrame["dynamicProgramming"]>,
+  pane: CanvasPane,
+  iteration: number,
+) {
+  context.save();
+  context.fillStyle = "rgba(255, 255, 255, 0.82)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`State (${dynamicProgramming.activeCell.row}, ${dynamicProgramming.activeCell.column})`, pane.x + 14, pane.y + 22);
+  context.fillStyle = dynamicProgramming.stable ? "#0f766e" : "#b7791f";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText(dynamicProgramming.stable ? "Policy arrows unlocked" : "Values still propagating", pane.x + 14, pane.y + 42);
+
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  wrapCanvasText(
+    context,
+    "V(s) is overwritten by scanning rows, columns, and four actions with a stochastic transition model.",
+    pane.x + 14,
+    pane.y + 64,
+    pane.width - 28,
+    14,
+    3,
+  );
+
+  const chart = {
+    x: pane.x + 14,
+    y: pane.y + 114,
+    width: pane.width - 28,
+    height: Math.min(210, pane.height - 190),
+  };
+  const minValue = Math.min(-0.1, ...dynamicProgramming.actionValues.map((item) => item.value));
+  const maxValue = Math.max(0.1, ...dynamicProgramming.actionValues.map((item) => item.value));
+  const zeroY = d3.scaleLinear().domain([minValue, maxValue]).range([chart.y + chart.height, chart.y])(0);
+
+  context.strokeStyle = "#dce5ea";
+  context.strokeRect(chart.x, chart.y, chart.width, chart.height);
+  context.strokeStyle = "rgba(97, 112, 127, 0.32)";
+  context.beginPath();
+  context.moveTo(chart.x, zeroY);
+  context.lineTo(chart.x + chart.width, zeroY);
+  context.stroke();
+
+  const barGap = 8;
+  const barWidth = (chart.width - barGap * 3) / 4;
+  dynamicProgramming.actionValues.forEach((item, index) => {
+    const heightScale = d3.scaleLinear().domain([minValue, maxValue]).range([chart.y + chart.height, chart.y]);
+    const yValue = heightScale(item.value);
+    const x = chart.x + index * (barWidth + barGap);
+    const y = Math.min(yValue, zeroY);
+    const height = Math.max(2, Math.abs(zeroY - yValue));
+    const best = item.value === Math.max(...dynamicProgramming.actionValues.map((candidate) => candidate.value));
+    context.fillStyle = best ? "#0f766e" : item.value < 0 ? "#d34a43" : "#2f6fbe";
+    context.globalAlpha = best ? 0.92 : 0.58;
+    context.fillRect(x, y, barWidth, height);
+    context.globalAlpha = 1;
+    context.fillStyle = "#17212b";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(item.label, x + barWidth / 2, chart.y + chart.height + 16);
+    context.fillStyle = "#61707f";
+    context.font = "700 9px Inter, system-ui, sans-serif";
+    context.fillText(item.value.toFixed(2), x + barWidth / 2, y - 5);
+  });
+
+  const legendY = pane.y + pane.height - 48;
+  const legend = [
+    { label: "open", color: "#f7fafc" },
+    { label: "wall", color: "#17212b" },
+    { label: "fire -10", color: "#ffd9d5" },
+    { label: "gold +10", color: "#ffe8a7" },
+  ];
+  legend.forEach((item, index) => {
+    const chipWidth = (pane.width - 28 - 18) / 4;
+    const x = pane.x + 14 + index * (chipWidth + 6);
+    context.fillStyle = item.color;
+    context.strokeStyle = "#dce5ea";
+    context.fillRect(x, legendY, chipWidth, 24);
+    context.strokeRect(x, legendY, chipWidth, 24);
+    context.fillStyle = item.label === "wall" ? "#f7fafc" : "#17212b";
+    context.font = "900 8px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(fitCanvasText(context, item.label, chipWidth - 8), x + chipWidth / 2, legendY + 16);
+  });
+
+  if (dynamicProgramming.stable) {
+    context.fillStyle = `rgba(15, 118, 110, ${0.16 + 0.08 * Math.sin(iteration * 0.6)})`;
+    context.fillRect(pane.x + 14, pane.y + 48, pane.width - 28, 2);
+  }
+
+  context.restore();
+}
+
+function dynamicProgrammingCellColor(
+  cell: GridWorldCell,
+  value: number,
+  positiveMax: number,
+  negativeMin: number,
+) {
+  if (cell === "wall") return "#17212b";
+  if (cell === "gold") return "#ffe8a7";
+  if (cell === "fire") return "#ffd9d5";
+  if (cell === "start") return "#d8edff";
+  if (value >= 0) {
+    return d3.interpolateRgb("#ffffff", "#b9ede3")(Math.min(1, value / positiveMax));
+  }
+  return d3.interpolateRgb("#ffffff", "#ffc6bd")(Math.min(1, value / negativeMin));
+}
+
+function dynamicProgrammingMethodLabel(method: NonNullable<ConceptFrame["dynamicProgramming"]>["method"]) {
+  return method === "policy-iteration" ? "Policy Iteration" : "Value Iteration";
+}
+
+function hitTestDynamicProgrammingGrid(
+  dynamicProgramming: NonNullable<ConceptFrame["dynamicProgramming"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const layout = dynamicProgrammingLayout(size);
+  const box = dynamicProgrammingGridBox(dynamicProgramming, layout.gridPane);
+  if (
+    point.x < box.x ||
+    point.y < box.y ||
+    point.x > box.x + box.width ||
+    point.y > box.y + box.height
+  ) {
+    return null;
+  }
+  return {
+    row: Math.min(dynamicProgramming.grid.rows - 1, Math.floor((point.y - box.y) / box.cellSize)),
+    column: Math.min(dynamicProgramming.grid.columns - 1, Math.floor((point.x - box.x) / box.cellSize)),
+  };
+}
+
+function gridWorldPaintTool(value: unknown): GridWorldCell {
+  return value === "empty" || value === "wall" || value === "fire" || value === "gold" || value === "start"
+    ? value
+    : "wall";
+}
+
+function paintGridWorldCell(grid: GridWorldValue, row: number, column: number, tool: GridWorldCell): GridWorldValue {
+  const cells = grid.cells.map((gridRow) => [...gridRow]);
+  if (tool === "start") {
+    for (let r = 0; r < cells.length; r += 1) {
+      for (let c = 0; c < cells[r].length; c += 1) {
+        if (cells[r][c] === "start") {
+          cells[r][c] = "empty";
+        }
+      }
+    }
+  }
+  cells[row][column] = tool;
+  return {
+    ...grid,
+    cells,
+  };
 }
 
 function paintConvolutionLesson(

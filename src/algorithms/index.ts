@@ -1,7 +1,7 @@
 import { categoryDemos } from "./categoryDemos";
 import { kMeans } from "./kMeans";
 import { linearRegression } from "./linearRegression";
-import type { AlgorithmDefinition, ParameterState } from "../types/algorithm";
+import type { AlgorithmDefinition, GridWorldValue, ParameterState } from "../types/algorithm";
 
 export const algorithms: AlgorithmDefinition[] = [
   linearRegression,
@@ -19,7 +19,16 @@ export function makeDefaultParams(algorithm: AlgorithmDefinition): ParameterStat
               ...parameter.defaultValue,
               values: parameter.defaultValue.values.map((row) => [...row]),
             }
+          : parameter.kind === "gridworld"
+            ? cloneGridWorld(parameter.defaultValue)
         : parameter.defaultValue;
     return state;
   }, {});
+}
+
+function cloneGridWorld(grid: GridWorldValue): GridWorldValue {
+  return {
+    ...grid,
+    cells: grid.cells.map((row) => [...row]),
+  };
 }

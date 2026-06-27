@@ -15,6 +15,7 @@ export const algorithmCategories = [
   "Handling Imbalanced Data",
   "Time Series Fundamentals",
   "Stochastic Processes",
+  "Dynamic Programming",
   "Singular Value Decomposition",
   "Convex Optimization",
   "Convolutions from Scratch",
@@ -40,7 +41,22 @@ export type ImageMatrixParameterValue = {
   dataUrl?: string;
 };
 
-export type ParameterValue = number | string | boolean | MatrixParameterValue | ImageMatrixParameterValue;
+export type GridWorldCell = "empty" | "wall" | "fire" | "gold" | "start";
+
+export type GridWorldValue = {
+  kind: "gridworld";
+  rows: number;
+  columns: number;
+  cells: GridWorldCell[][];
+};
+
+export type ParameterValue =
+  | number
+  | string
+  | boolean
+  | MatrixParameterValue
+  | ImageMatrixParameterValue
+  | GridWorldValue;
 
 export type ParameterState = Record<string, ParameterValue>;
 
@@ -115,6 +131,13 @@ export type ImageParameter = {
   defaultValue: ImageMatrixParameterValue;
 };
 
+export type GridWorldParameter = {
+  kind: "gridworld";
+  id: string;
+  label: string;
+  defaultValue: GridWorldValue;
+};
+
 export type ParameterDefinition =
   | NumericParameter
   | StepperParameter
@@ -122,7 +145,8 @@ export type ParameterDefinition =
   | SelectParameter
   | ToggleParameter
   | MatrixParameter
-  | ImageParameter;
+  | ImageParameter
+  | GridWorldParameter;
 
 export type DataPoint = {
   x: number;
@@ -551,6 +575,40 @@ export type ConvolutionState = {
   };
 };
 
+export type DynamicProgrammingMethod = "value-iteration" | "policy-iteration";
+
+export type DynamicProgrammingAction = "up" | "right" | "down" | "left";
+
+export type DynamicProgrammingActionValue = {
+  action: DynamicProgrammingAction;
+  label: string;
+  value: number;
+};
+
+export type DynamicProgrammingPolicyCell = {
+  row: number;
+  column: number;
+  action: DynamicProgrammingAction;
+  value: number;
+};
+
+export type DynamicProgrammingState = {
+  grid: GridWorldValue;
+  method: DynamicProgrammingMethod;
+  gamma: number;
+  sweep: number;
+  values: MatrixParameterValue;
+  previousValues: MatrixParameterValue;
+  delta: number;
+  stable: boolean;
+  activeCell: {
+    row: number;
+    column: number;
+  };
+  actionValues: DynamicProgrammingActionValue[];
+  policy: DynamicProgrammingPolicyCell[];
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -569,6 +627,7 @@ export type ConceptFrame = {
   svd?: SvdState;
   convex?: ConvexState;
   convolution?: ConvolutionState;
+  dynamicProgramming?: DynamicProgrammingState;
   summary: string;
 };
 

@@ -426,7 +426,8 @@ h1 {
 .visual-shell.framework-shell,
 .visual-shell.stochastic-shell,
 .visual-shell.svd-shell,
-.visual-shell.convex-shell {
+.visual-shell.convex-shell,
+.visual-shell.dynamic-programming-shell {
   min-height: 620px;
 }
 
@@ -434,7 +435,8 @@ h1 {
 .visual-shell.stochastic-shell,
 .visual-shell.svd-shell,
 .visual-shell.convex-shell,
-.visual-shell.convolution-shell {
+.visual-shell.convolution-shell,
+.visual-shell.dynamic-programming-shell {
   min-height: 680px;
 }
 
@@ -445,6 +447,10 @@ h1 {
   display: block;
 }
 
+.visual-shell.dynamic-programming-shell canvas {
+  cursor: crosshair;
+}
+
 .visual-shell.backprop-shell canvas,
 .visual-shell.activation-shell canvas,
 .visual-shell.loss-shell canvas,
@@ -452,7 +458,8 @@ h1 {
 .visual-shell.framework-shell canvas,
 .visual-shell.stochastic-shell canvas,
 .visual-shell.svd-shell canvas,
-.visual-shell.convex-shell canvas {
+.visual-shell.convex-shell canvas,
+.visual-shell.dynamic-programming-shell canvas {
   min-height: 620px;
 }
 
@@ -460,7 +467,8 @@ h1 {
 .visual-shell.stochastic-shell canvas,
 .visual-shell.svd-shell canvas,
 .visual-shell.convex-shell canvas,
-.visual-shell.convolution-shell canvas {
+.visual-shell.convolution-shell canvas,
+.visual-shell.dynamic-programming-shell canvas {
   min-height: 680px;
 }
 
@@ -595,6 +603,26 @@ h1 {
 
 .action-button {
   width: 100%;
+}
+
+.gridworld-control {
+  gap: 12px;
+}
+
+.gridworld-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.gridworld-counts span {
+  border: 1px solid var(--line);
+  background: #f7fafc;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 7px 8px;
+  text-align: center;
 }
 
 .matrix-control {
@@ -1031,7 +1059,9 @@ select {
   .visual-shell.convex-shell,
   .visual-shell.convex-shell canvas,
   .visual-shell.convolution-shell,
-  .visual-shell.convolution-shell canvas {
+  .visual-shell.convolution-shell canvas,
+  .visual-shell.dynamic-programming-shell,
+  .visual-shell.dynamic-programming-shell canvas {
     min-height: 860px;
   }
 }

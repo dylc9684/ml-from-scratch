@@ -13,7 +13,11 @@ import type {
   ContrastivePair,
   ContrastivePoint,
   DataPoint,
+  DynamicProgrammingAction,
+  DynamicProgrammingMethod,
   EngineResult,
+  GridWorldCell,
+  GridWorldValue,
   ImageMatrixParameterValue,
   LossFunctionKey,
   LossSurfaceKey,
@@ -77,6 +81,40 @@ function imageMatrixParam(
   }
 
   return fallback;
+}
+
+function gridWorldParam(
+  params: ParameterState,
+  key: string,
+  fallback: GridWorldValue,
+) {
+  const value = params[key];
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    value.kind === "gridworld" &&
+    Array.isArray(value.cells)
+  ) {
+    return {
+      ...value,
+      rows: value.rows,
+      columns: value.columns,
+      cells: value.cells.map((row) =>
+        row.map((cell) => (isGridWorldCell(cell) ? cell : "empty")),
+      ),
+    };
+  }
+
+  return {
+    ...fallback,
+    cells: fallback.cells.map((row) => [...row]),
+  };
+}
+
+function isGridWorldCell(value: unknown): value is GridWorldCell {
+  return value === "empty" || value === "wall" || value === "fire" || value === "gold" || value === "start";
 }
 
 function makeDataset(name: string, points: DataPoint[]): NormalizedDataset {
@@ -1307,6 +1345,600 @@ function transitionEntropy(matrix: number[][]) {
     row.reduce((total, value) => (value > 0 ? total - value * Math.log2(value) : total), 0),
   );
   return average(rowEntropies);
+}
+
+const defaultGridWorld = makeDefaultGridWorld();
+
+const dynamicProgramming = makeConceptAlgorithm({
+  id: "dynamic-programming",
+  name: "Dynamic Programming",
+  category: "Dynamic Programming",
+  summary: "Propagates Gridworld rewards with Bellman value updates and extracts an optimal policy.",
+  parameters: [
+    {
+      kind: "gridworld",
+      id: "gridWorld",
+      label: "Gridworld layout",
+      defaultValue: defaultGridWorld,
+    },
+    {
+      kind: "select",
+      id: "paintTool",
+      label: "Paint tool",
+      defaultValue: "wall",
+      options: [
+        { label: "Wall", value: "wall" },
+        { label: "Fire pit", value: "fire" },
+        { label: "Gold chest", value: "gold" },
+        { label: "Start", value: "start" },
+        { label: "Open cell", value: "empty" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "discount",
+      label: "Discount factor gamma",
+      min: 0.5,
+      max: 0.98,
+      step: 0.01,
+      defaultValue: 0.9,
+      format: "decimal",
+    },
+    {
+      kind: "select",
+      id: "dpMethod",
+      label: "DP method",
+      defaultValue: "value-iteration",
+      options: [
+        { label: "Value Iteration", value: "value-iteration" },
+        { label: "Policy Iteration", value: "policy-iteration" },
+      ],
+    },
+    {
+      kind: "action",
+      id: "dpStep",
+      label: "Bellman sweep",
+      buttonLabel: "Step",
+      min: 0,
+      max: 80,
+      step: 1,
+      defaultValue: 0,
+      format: "integer",
+    },
+  ],
+  sample: makeDynamicProgrammingDataset,
+  formulas: [
+    { title: "Bellman optimality", expression: "V_{k+1}(s)=\\max_a\\sum_{s'}P(s'\\mid s,a)[R(s,a,s')+\\gamma V_k(s')]" },
+    { title: "Policy evaluation", expression: "V^{\\pi}_{k+1}(s)=\\sum_{s'}P(s'\\mid s,\\pi(s))[R(s,\\pi(s),s')+\\gamma V^{\\pi}_k(s')]" },
+    { title: "Policy extraction", expression: "\\pi^*(s)=\\arg\\max_a\\sum_{s'}P(s'\\mid s,a)[R(s,a,s')+\\gamma V(s')]" },
+  ],
+  explanation: [
+    "Dynamic programming solves a known Markov decision process by repeatedly applying Bellman updates to a value matrix.",
+    "In Gridworld, each coordinate is a state. Walls block movement, fire pits are negative terminal rewards, and gold chests are positive terminal rewards.",
+    "As sweeps accumulate, reward information propagates outward through the grid; once the values stabilize, the best neighboring action becomes the optimal policy arrow.",
+  ],
+  engine: (_, params) => {
+    const grid = gridWorldParam(params, "gridWorld", defaultGridWorld);
+    const gamma = Math.max(0.5, Math.min(0.98, numberParam(params, "discount", 0.9)));
+    const method = dynamicProgrammingMethodParam(params, "dpMethod", "value-iteration");
+    const baseSweep = Math.max(0, Math.min(80, Math.round(numberParam(params, "dpStep", 0))));
+    const playSignal = Math.round(numberParam(params, "playSignal", 0));
+    const shouldPlay = playSignal > baseSweep;
+    const frameCount = shouldPlay ? Math.max(2, Math.min(44, 81 - baseSweep)) : 1;
+    const maxSweep = Math.min(80, baseSweep + frameCount - 1);
+    const snapshots = runDynamicProgrammingGrid(grid, gamma, method, maxSweep);
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const snapshot = snapshots[Math.min(maxSweep, baseSweep + index)] ?? snapshots[snapshots.length - 1];
+      const openCells = grid.cells.flat().filter((cell) => cell !== "wall").length;
+
+      return {
+        type: "concept-demo" as const,
+        iteration: snapshot.sweep + 1,
+        points: snapshot.values.flatMap((row, rowIndex) =>
+          row.map((value, columnIndex) => ({
+            x: columnIndex,
+            y: rowIndex,
+            label: grid.cells[rowIndex]?.[columnIndex] ?? "empty",
+            value,
+          })),
+        ),
+        dynamicProgramming: {
+          grid,
+          method,
+          gamma,
+          sweep: snapshot.sweep,
+          values: snapshot.values,
+          previousValues: snapshot.previousValues,
+          delta: snapshot.delta,
+          stable: snapshot.stable,
+          activeCell: snapshot.activeCell,
+          actionValues: snapshot.actionValues,
+          policy: snapshot.policy,
+        },
+        summary: `${dynamicProgrammingMethodLabel(method)} · sweep ${snapshot.sweep} · delta ${snapshot.delta.toFixed(3)} · ${snapshot.stable ? "policy stable" : `${openCells} states`}`,
+      };
+    });
+    const final = frames[frames.length - 1].dynamicProgramming;
+    const counts = countGridCells(grid);
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "Method", value: dynamicProgrammingMethodLabel(method) },
+        { label: "Discount", value: gamma.toFixed(2) },
+        { label: "Delta", value: final.delta.toFixed(3) },
+        { label: "Terminals", value: `${counts.gold + counts.fire}` },
+      ],
+    };
+  },
+  python: (params) => {
+    const gamma = numberParam(params, "discount", 0.9).toFixed(2);
+    const method = dynamicProgrammingMethodParam(params, "dpMethod", "value-iteration");
+
+    return `import numpy as np
+
+gamma = ${gamma}
+method = "${method}"
+actions = {
+    "up": (-1, 0),
+    "right": (0, 1),
+    "down": (1, 0),
+    "left": (0, -1),
+}
+grid = np.array(${formatGridWorldLiteral(gridWorldParam(params, "gridWorld", defaultGridWorld))})
+V = np.zeros(grid.shape, dtype=float)
+V[grid == "gold"] = 10
+V[grid == "fire"] = -10
+policy = np.full(grid.shape, "right", dtype=object)
+
+def move(r, c, action):
+    dr, dc = actions[action]
+    nr, nc = r + dr, c + dc
+    if nr < 0 or nc < 0 or nr >= grid.shape[0] or nc >= grid.shape[1]:
+        return r, c
+    if grid[nr, nc] == "wall":
+        return r, c
+    return nr, nc
+
+def reward(cell):
+    if cell == "gold":
+        return 10
+    if cell == "fire":
+        return -10
+    return -0.04
+
+def transition_matrix(action):
+    side = {
+        "up": ("left", "right"),
+        "right": ("up", "down"),
+        "down": ("left", "right"),
+        "left": ("up", "down"),
+    }
+    return [(action, 0.8), (side[action][0], 0.1), (side[action][1], 0.1)]
+
+def q_value(r, c, action, values):
+    total = 0.0
+    for candidate, prob in transition_matrix(action):
+        nr, nc = move(r, c, candidate)
+        terminal = grid[nr, nc] in ("gold", "fire")
+        total += prob * (reward(grid[nr, nc]) + gamma * (0 if terminal else values[nr, nc]))
+    return total
+
+for sweep in range(40):
+    next_V = V.copy()
+    for r in range(grid.shape[0]):
+        for c in range(grid.shape[1]):
+            if grid[r, c] in ("wall", "gold", "fire"):
+                continue
+            if method == "value-iteration":
+                next_V[r, c] = max(q_value(r, c, a, V) for a in actions)
+            else:
+                next_V[r, c] = q_value(r, c, policy[r, c], V)
+    V = next_V
+    for r in range(grid.shape[0]):
+        for c in range(grid.shape[1]):
+            if grid[r, c] not in ("wall", "gold", "fire"):
+                policy[r, c] = max(actions, key=lambda a: q_value(r, c, a, V))`;
+  },
+  javascript: (params) => {
+    const gamma = numberParam(params, "discount", 0.9).toFixed(2);
+    const method = dynamicProgrammingMethodParam(params, "dpMethod", "value-iteration");
+
+    return `const gamma = ${gamma};
+const method = "${method}";
+const actions = {
+  up: [-1, 0],
+  right: [0, 1],
+  down: [1, 0],
+  left: [0, -1],
+};
+const grid = ${formatGridWorldLiteral(gridWorldParam(params, "gridWorld", defaultGridWorld))};
+let V = grid.map((row) =>
+  row.map((cell) => cell === "gold" ? 10 : cell === "fire" ? -10 : 0),
+);
+let policy = grid.map((row) => row.map(() => "right"));
+
+for (let sweep = 0; sweep < 40; sweep += 1) {
+  const nextV = V.map((row) => [...row]);
+  for (let r = 0; r < grid.length; r += 1) {
+    for (let c = 0; c < grid[0].length; c += 1) {
+      if (["wall", "gold", "fire"].includes(grid[r][c])) continue;
+      if (method === "value-iteration") {
+        nextV[r][c] = Math.max(...Object.keys(actions).map((a) => qValue(r, c, a, V)));
+      } else {
+        nextV[r][c] = qValue(r, c, policy[r][c], V);
+      }
+    }
+  }
+  V = nextV;
+  policy = improvePolicy(V);
+}
+
+// For larger mazes, run the same loop in a Web Worker and post V back to the canvas.
+function qValue(r, c, action, values) {
+  return transitionMatrix(action).reduce((total, [candidate, prob]) => {
+    const [nr, nc] = move(r, c, candidate);
+    const terminal = grid[nr][nc] === "gold" || grid[nr][nc] === "fire";
+    return total + prob * (reward(grid[nr][nc]) + gamma * (terminal ? 0 : values[nr][nc]));
+  }, 0);
+}
+
+function transitionMatrix(action) {
+  const side = {
+    up: ["left", "right"],
+    right: ["up", "down"],
+    down: ["left", "right"],
+    left: ["up", "down"],
+  };
+  return [[action, 0.8], [side[action][0], 0.1], [side[action][1], 0.1]];
+}
+
+function move(r, c, action) {
+  const [dr, dc] = actions[action];
+  const nr = r + dr;
+  const nc = c + dc;
+  if (nr < 0 || nc < 0 || nr >= grid.length || nc >= grid[0].length) return [r, c];
+  return grid[nr][nc] === "wall" ? [r, c] : [nr, nc];
+}
+
+function reward(cell) {
+  if (cell === "gold") return 10;
+  if (cell === "fire") return -10;
+  return -0.04;
+}
+
+function improvePolicy(values) {
+  return grid.map((row, r) =>
+    row.map((cell, c) => {
+      if (["wall", "gold", "fire"].includes(cell)) return "right";
+      return Object.keys(actions).sort((a, b) => qValue(r, c, b, values) - qValue(r, c, a, values))[0];
+    }),
+  );
+}`;
+  },
+});
+
+type DynamicProgrammingSnapshot = {
+  sweep: number;
+  values: number[][];
+  previousValues: number[][];
+  delta: number;
+  stable: boolean;
+  activeCell: {
+    row: number;
+    column: number;
+  };
+  actionValues: Array<{ action: DynamicProgrammingAction; label: string; value: number }>;
+  policy: Array<{ row: number; column: number; action: DynamicProgrammingAction; value: number }>;
+};
+
+const dynamicProgrammingActions: Array<{
+  id: DynamicProgrammingAction;
+  label: string;
+  delta: [number, number];
+}> = [
+  { id: "up", label: "Up", delta: [-1, 0] },
+  { id: "right", label: "Right", delta: [0, 1] },
+  { id: "down", label: "Down", delta: [1, 0] },
+  { id: "left", label: "Left", delta: [0, -1] },
+];
+
+function makeDefaultGridWorld(): GridWorldValue {
+  const cells: GridWorldCell[][] = [
+    ["start", "empty", "empty", "wall", "empty", "empty", "empty", "gold"],
+    ["empty", "wall", "empty", "wall", "empty", "wall", "empty", "empty"],
+    ["empty", "wall", "empty", "empty", "empty", "wall", "empty", "wall"],
+    ["empty", "empty", "empty", "wall", "empty", "empty", "empty", "empty"],
+    ["wall", "wall", "empty", "wall", "empty", "wall", "wall", "empty"],
+    ["fire", "empty", "empty", "empty", "empty", "empty", "wall", "empty"],
+    ["empty", "empty", "wall", "wall", "empty", "empty", "empty", "empty"],
+    ["empty", "empty", "empty", "fire", "empty", "wall", "empty", "gold"],
+  ];
+
+  return {
+    kind: "gridworld",
+    rows: cells.length,
+    columns: cells[0].length,
+    cells,
+  };
+}
+
+function makeDynamicProgrammingDataset() {
+  return makeDataset(
+    "Generated Gridworld states",
+    defaultGridWorld.cells.flatMap((row, rowIndex) =>
+      row.map((cell, columnIndex) => ({
+        x: columnIndex,
+        y: rowIndex,
+        label: cell,
+      })),
+    ),
+  );
+}
+
+function dynamicProgrammingMethodParam(
+  params: ParameterState,
+  key: string,
+  fallback: DynamicProgrammingMethod,
+): DynamicProgrammingMethod {
+  const value = stringParam(params, key, fallback);
+  return value === "policy-iteration" || value === "value-iteration" ? value : fallback;
+}
+
+function runDynamicProgrammingGrid(
+  grid: GridWorldValue,
+  gamma: number,
+  method: DynamicProgrammingMethod,
+  maxSweep: number,
+) {
+  let values: number[][] = initialGridWorldValues(grid);
+  let policy = initialGridWorldPolicy(grid);
+  const snapshots: DynamicProgrammingSnapshot[] = [
+    makeDynamicProgrammingSnapshot(grid, gamma, values, values, policy, 0, 0),
+  ];
+
+  for (let sweep = 1; sweep <= maxSweep; sweep += 1) {
+    const previousValues = values.map((row) => [...row]);
+    if (method === "value-iteration") {
+      values = bellmanOptimalitySweep(grid, gamma, previousValues);
+    } else {
+      values = bellmanPolicyEvaluationSweep(grid, gamma, previousValues, policy);
+      policy = greedyGridWorldPolicy(grid, gamma, values);
+    }
+    if (method === "value-iteration") {
+      policy = greedyGridWorldPolicy(grid, gamma, values);
+    }
+    snapshots.push(makeDynamicProgrammingSnapshot(grid, gamma, values, previousValues, policy, sweep, gridWorldDelta(values, previousValues, grid)));
+  }
+
+  return snapshots;
+}
+
+function initialGridWorldValues(grid: GridWorldValue) {
+  return grid.cells.map((row) =>
+    row.map((cell) => {
+      if (cell === "gold") return 10;
+      if (cell === "fire") return -10;
+      return 0;
+    }),
+  );
+}
+
+function initialGridWorldPolicy(grid: GridWorldValue) {
+  const goals = grid.cells.flatMap((row, rowIndex) =>
+    row.flatMap((cell, columnIndex) => (cell === "gold" ? [{ row: rowIndex, column: columnIndex }] : [])),
+  );
+
+  return grid.cells.map((row, rowIndex) =>
+    row.map((cell, columnIndex) => {
+      if (cell === "wall" || cell === "gold" || cell === "fire") {
+        return "right" as DynamicProgrammingAction;
+      }
+      const nearestGoal = [...goals].sort(
+        (a, b) =>
+          Math.abs(a.row - rowIndex) + Math.abs(a.column - columnIndex) -
+          (Math.abs(b.row - rowIndex) + Math.abs(b.column - columnIndex)),
+      )[0];
+      if (!nearestGoal) {
+        return "right" as DynamicProgrammingAction;
+      }
+      const rowGap = nearestGoal.row - rowIndex;
+      const columnGap = nearestGoal.column - columnIndex;
+      if (Math.abs(columnGap) >= Math.abs(rowGap)) {
+        return columnGap >= 0 ? "right" : "left";
+      }
+      return rowGap >= 0 ? "down" : "up";
+    }),
+  );
+}
+
+function bellmanOptimalitySweep(grid: GridWorldValue, gamma: number, values: number[][]) {
+  return grid.cells.map((row, rowIndex) =>
+    row.map((cell, columnIndex) => {
+      if (cell === "wall") return 0;
+      if (cell === "gold") return 10;
+      if (cell === "fire") return -10;
+      return Math.max(
+        ...dynamicProgrammingActions.map((action) =>
+          dynamicProgrammingActionValue(grid, gamma, values, rowIndex, columnIndex, action.id),
+        ),
+      );
+    }),
+  );
+}
+
+function bellmanPolicyEvaluationSweep(
+  grid: GridWorldValue,
+  gamma: number,
+  values: number[][],
+  policy: DynamicProgrammingAction[][],
+) {
+  return grid.cells.map((row, rowIndex) =>
+    row.map((cell, columnIndex) => {
+      if (cell === "wall") return 0;
+      if (cell === "gold") return 10;
+      if (cell === "fire") return -10;
+      return dynamicProgrammingActionValue(grid, gamma, values, rowIndex, columnIndex, policy[rowIndex][columnIndex]);
+    }),
+  );
+}
+
+function greedyGridWorldPolicy(grid: GridWorldValue, gamma: number, values: number[][]) {
+  return grid.cells.map((row, rowIndex) =>
+    row.map((cell, columnIndex) => {
+      if (cell === "wall" || cell === "gold" || cell === "fire") {
+        return "right" as DynamicProgrammingAction;
+      }
+      return bestDynamicProgrammingAction(grid, gamma, values, rowIndex, columnIndex).action;
+    }),
+  );
+}
+
+function makeDynamicProgrammingSnapshot(
+  grid: GridWorldValue,
+  gamma: number,
+  values: number[][],
+  previousValues: number[][],
+  policy: DynamicProgrammingAction[][],
+  sweep: number,
+  delta: number,
+): DynamicProgrammingSnapshot {
+  const states = grid.cells.flatMap((row, rowIndex) =>
+    row.flatMap((cell, columnIndex) =>
+      cell === "wall" || cell === "gold" || cell === "fire" ? [] : [{ row: rowIndex, column: columnIndex }],
+    ),
+  );
+  const activeCell = states[sweep % Math.max(1, states.length)] ?? { row: 0, column: 0 };
+  const actionValues = dynamicProgrammingActions.map((action) => ({
+    action: action.id,
+    label: action.label,
+    value: dynamicProgrammingActionValue(grid, gamma, values, activeCell.row, activeCell.column, action.id),
+  }));
+  const policyCells = grid.cells.flatMap((row, rowIndex) =>
+    row.flatMap((cell, columnIndex) => {
+      if (cell === "wall" || cell === "gold" || cell === "fire") {
+        return [];
+      }
+      const action = policy[rowIndex][columnIndex];
+      return [{ row: rowIndex, column: columnIndex, action, value: values[rowIndex][columnIndex] }];
+    }),
+  );
+
+  return {
+    sweep,
+    values: values.map((row) => row.map((value) => round(value, 3))),
+    previousValues: previousValues.map((row) => row.map((value) => round(value, 3))),
+    delta: round(delta, 4),
+    stable: sweep > 0 && (delta < 0.03 || sweep >= 36),
+    activeCell,
+    actionValues,
+    policy: policyCells,
+  };
+}
+
+function dynamicProgrammingActionValue(
+  grid: GridWorldValue,
+  gamma: number,
+  values: number[][],
+  row: number,
+  column: number,
+  action: DynamicProgrammingAction,
+) {
+  return transitionOutcomes(action).reduce((total, outcome) => {
+    const next = moveGridWorld(grid, row, column, outcome.action);
+    const nextCell = grid.cells[next.row][next.column];
+    const terminal = nextCell === "gold" || nextCell === "fire";
+    return total + outcome.probability * (gridWorldReward(nextCell) + gamma * (terminal ? 0 : values[next.row][next.column]));
+  }, 0);
+}
+
+function bestDynamicProgrammingAction(
+  grid: GridWorldValue,
+  gamma: number,
+  values: number[][],
+  row: number,
+  column: number,
+) {
+  return dynamicProgrammingActions
+    .map((action) => ({
+      action: action.id,
+      value: dynamicProgrammingActionValue(grid, gamma, values, row, column, action.id),
+    }))
+    .sort((a, b) => b.value - a.value)[0];
+}
+
+function transitionOutcomes(action: DynamicProgrammingAction) {
+  const perpendiculars: Record<DynamicProgrammingAction, DynamicProgrammingAction[]> = {
+    up: ["left", "right"],
+    right: ["up", "down"],
+    down: ["left", "right"],
+    left: ["up", "down"],
+  };
+  return [
+    { action, probability: 0.8 },
+    { action: perpendiculars[action][0], probability: 0.1 },
+    { action: perpendiculars[action][1], probability: 0.1 },
+  ];
+}
+
+function moveGridWorld(
+  grid: GridWorldValue,
+  row: number,
+  column: number,
+  action: DynamicProgrammingAction,
+) {
+  const delta = dynamicProgrammingActions.find((item) => item.id === action)?.delta ?? [0, 0];
+  const nextRow = row + delta[0];
+  const nextColumn = column + delta[1];
+  if (
+    nextRow < 0 ||
+    nextColumn < 0 ||
+    nextRow >= grid.rows ||
+    nextColumn >= grid.columns ||
+    grid.cells[nextRow][nextColumn] === "wall"
+  ) {
+    return { row, column };
+  }
+  return { row: nextRow, column: nextColumn };
+}
+
+function gridWorldReward(cell: GridWorldCell) {
+  if (cell === "gold") return 10;
+  if (cell === "fire") return -10;
+  return -0.04;
+}
+
+function gridWorldDelta(values: number[][], previousValues: number[][], grid: GridWorldValue) {
+  let delta = 0;
+  for (let row = 0; row < values.length; row += 1) {
+    for (let column = 0; column < values[row].length; column += 1) {
+      if (grid.cells[row][column] !== "wall") {
+        delta = Math.max(delta, Math.abs(values[row][column] - previousValues[row][column]));
+      }
+    }
+  }
+  return delta;
+}
+
+function countGridCells(grid: GridWorldValue) {
+  return grid.cells.flat().reduce<Record<GridWorldCell, number>>(
+    (counts, cell) => ({
+      ...counts,
+      [cell]: counts[cell] + 1,
+    }),
+    { empty: 0, wall: 0, fire: 0, gold: 0, start: 0 },
+  );
+}
+
+function dynamicProgrammingMethodLabel(method: DynamicProgrammingMethod) {
+  return method === "policy-iteration" ? "Policy Iteration" : "Value Iteration";
+}
+
+function formatGridWorldLiteral(grid: GridWorldValue) {
+  return `[
+  ${grid.cells.map((row) => `[${row.map((cell) => `"${cell}"`).join(", ")}]`).join(",\n  ")}
+]`;
 }
 
 const defaultSvdImage = makeDefaultSvdImage(36);
@@ -5000,6 +5632,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   imbalancedData,
   timeSeries,
   stochasticProcesses,
+  dynamicProgramming,
   singularValueDecomposition,
   convexOptimization,
   convolutionsFromScratch,

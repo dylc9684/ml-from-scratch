@@ -123,6 +123,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Handling Imbalanced Data": "Sampling, class weights, and threshold tradeoffs.",
   "Time Series Fundamentals": "Trend, seasonality, lag features, and forecasting.",
   "Stochastic Processes": "Random walks, noise, transition matrices, and Markov chains.",
+  "Dynamic Programming": "Bellman updates, Gridworld values, and optimal policies.",
   "Singular Value Decomposition": "Low-rank image compression and geometric matrix factors.",
   "Convex Optimization": "Constrained bowls, projected steps, Hessians, and convexity checks.",
   "Convolutions from Scratch": "Kernels, padding, stride, and image feature maps.",

@@ -2,6 +2,8 @@ import { ImageUp, Minus, Plus } from "lucide-react";
 import { Fragment } from "react";
 import type {
   AlgorithmDefinition,
+  GridWorldCell,
+  GridWorldValue,
   ParameterDefinition,
   ParameterState,
   ParameterValue,
@@ -240,6 +242,34 @@ function Control({
     );
   }
 
+  if (parameter.kind === "gridworld") {
+    const gridValue = toGridWorldValue(value, parameter.defaultValue);
+    const counts = countGridWorldCells(gridValue);
+    const resetGrid = () => {
+      onChange({
+        ...parameter.defaultValue,
+        cells: parameter.defaultValue.cells.map((row) => [...row]),
+      });
+    };
+
+    return (
+      <div className="control-card gridworld-control">
+        <span className="control-label">
+          <strong>{parameter.label}</strong>
+          <span>{gridValue.rows}x{gridValue.columns}</span>
+        </span>
+        <div className="gridworld-counts" aria-label={`${parameter.label} cell summary`}>
+          <span>Walls {counts.wall}</span>
+          <span>Fire {counts.fire}</span>
+          <span>Gold {counts.gold}</span>
+        </div>
+        <button className="button secondary action-button" type="button" onClick={resetGrid}>
+          Reset layout
+        </button>
+      </div>
+    );
+  }
+
   if (parameter.kind === "action") {
     const numericValue = Number(value ?? parameter.defaultValue);
     const nextValue =
@@ -278,6 +308,30 @@ function Control({
         </label>
       </div>
     </div>
+  );
+}
+
+function toGridWorldValue(value: ParameterValue, fallback: GridWorldValue) {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    value.kind === "gridworld"
+  ) {
+    return value;
+  }
+
+  return fallback;
+}
+
+function countGridWorldCells(grid: GridWorldValue) {
+  return grid.cells.flat().reduce<Record<GridWorldCell, number>>(
+    (counts, cell) => ({
+      ...counts,
+      [cell]: counts[cell] + 1,
+    }),
+    { empty: 0, wall: 0, fire: 0, gold: 0, start: 0 },
   );
 }
 
