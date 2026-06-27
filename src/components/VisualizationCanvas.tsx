@@ -44,7 +44,7 @@ type CanvasPane = {
 
 export function VisualizationCanvas({ frame, algorithm, params, onParamChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [size, setSize] = useState<Size>({ width: 820, height: 520 });
+  const [size, setSize] = useState<Size>({ width: 820, height: 420 });
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
   const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);

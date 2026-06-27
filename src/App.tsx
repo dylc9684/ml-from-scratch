@@ -12,6 +12,7 @@ import { AlgorithmCatalog } from "./components/AlgorithmCatalog";
 import { CodeViewer } from "./components/CodeViewer";
 import { DatasetPanel } from "./components/DatasetPanel";
 import { EducationPanel } from "./components/EducationPanel";
+import { AlgorithmDeepDive } from "./components/AlgorithmDeepDive";
 import { MetricsGrid } from "./components/MetricsGrid";
 import { ParameterControls } from "./components/ParameterControls";
 import { VisualizationCanvas } from "./components/VisualizationCanvas";
@@ -261,6 +262,11 @@ export default function App() {
             algorithm={activeAlgorithm}
             params={params}
             onParamChange={handleParamChange}
+          />
+          <AlgorithmDeepDive
+            algorithm={activeAlgorithm}
+            frame={currentFrame}
+            metrics={engineResult.metrics}
           />
           <MetricsGrid metrics={engineResult.metrics} />
         </main>
