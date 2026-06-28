@@ -1363,6 +1363,192 @@ function determinantOrientationLabel(orientation: "positive" | "negative" | "zer
   return "Collapsed";
 }
 
+const findMagicDirections = makeConceptAlgorithm({
+  id: "find-magic-directions",
+  name: "Find the Magic Directions",
+  category: "Determinants & Linear Transformations",
+  summary: "Lets users drag a test vector and discover eigenvectors as directions preserved by a matrix.",
+  parameters: [
+    { kind: "range", id: "magicA", label: "a: x of transformed i", min: -3, max: 3, step: 0.05, defaultValue: 1.65, format: "decimal" },
+    { kind: "range", id: "magicB", label: "b: x of transformed j", min: -3, max: 3, step: 0.05, defaultValue: 0.75, format: "decimal" },
+    { kind: "range", id: "magicC", label: "c: y of transformed i", min: -3, max: 3, step: 0.05, defaultValue: 0.45, format: "decimal" },
+    { kind: "range", id: "magicD", label: "d: y of transformed j", min: -3, max: 3, step: 0.05, defaultValue: 1.05, format: "decimal" },
+    { kind: "range", id: "magicAngle", label: "Test vector direction", min: -180, max: 180, step: 1, defaultValue: 32, format: "integer" },
+    { kind: "toggle", id: "magicShowAll", label: "Show all eigenvectors", defaultValue: true },
+    { kind: "action", id: "magicAnimateStep", label: "Transformation story", buttonLabel: "Animate", min: 0, max: 4, step: 1, defaultValue: 0, format: "integer" },
+    { kind: "action", id: "magicPowerStep", label: "Power iteration step", buttonLabel: "Power Iteration", min: 0, max: 14, step: 1, defaultValue: 0, format: "integer" },
+  ],
+  sample: () =>
+    makeDataset("Generated eigenvector direction sample", [
+      { x: 1, y: 0, label: "basis i" },
+      { x: 0, y: 1, label: "basis j" },
+      { x: Math.cos((32 * Math.PI) / 180), y: Math.sin((32 * Math.PI) / 180), label: "test vector" },
+    ]),
+  formulas: [
+    { title: "Eigenvector definition", expression: "Av=\\lambda v" },
+    { title: "Direction preservation", expression: "\\angle(Av,v)=0^\\circ\\ \\text{or}\\ 180^\\circ" },
+    { title: "Power iteration", expression: "v_{t+1}=\\frac{Av_t}{||Av_t||}" },
+  ],
+  explanation: [
+    "Most vectors rotate, shear, or bend away from their original direction after a matrix transformation.",
+    "Eigenvectors are the rare directions that stay on the same line: the matrix only stretches, shrinks, or reverses them.",
+    "Power iteration repeatedly applies the matrix and often drifts toward the dominant eigenvector.",
+  ],
+  engine: (_, params) => {
+    const a = numberParam(params, "magicA", 1.65);
+    const b = numberParam(params, "magicB", 0.75);
+    const c = numberParam(params, "magicC", 0.45);
+    const d = numberParam(params, "magicD", 1.05);
+    const angleDegrees = numberParam(params, "magicAngle", 32);
+    const showAll = Boolean(params.magicShowAll ?? true);
+    const animationStep = Math.round(numberParam(params, "magicAnimateStep", 0));
+    const powerStep = Math.round(numberParam(params, "magicPowerStep", 0));
+    const state = makeEigenDirectionState(a, b, c, d, angleDegrees, showAll, animationStep, powerStep);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: animationStep + powerStep,
+        points: [
+          { ...state.testVector, label: "test vector" },
+          { ...state.transformedVector, label: "transformed vector" },
+        ],
+        eigenDirection: state,
+        summary: `${state.isEigenvector ? "Eigenvector" : "Ordinary vector"} · angle ${state.angleDifference.toFixed(1)}deg · scale ${state.lengthScale.toFixed(2)}x`,
+      },
+      [
+        { label: "Angle difference", value: `${state.angleDifference.toFixed(1)}deg` },
+        { label: "Length scale", value: `${state.lengthScale.toFixed(2)}x` },
+        { label: "Status", value: state.isEigenvector ? "Eigenvector" : "Ordinary vector" },
+        { label: "Eigenvalue", value: state.isEigenvector ? state.eigenvalueEstimate.toFixed(3) : "not aligned" },
+      ],
+    );
+  },
+  python: (params) => {
+    const a = numberParam(params, "magicA", 1.65).toFixed(2);
+    const b = numberParam(params, "magicB", 0.75).toFixed(2);
+    const c = numberParam(params, "magicC", 0.45).toFixed(2);
+    const d = numberParam(params, "magicD", 1.05).toFixed(2);
+    const angle = numberParam(params, "magicAngle", 32).toFixed(0);
+
+    return `import numpy as np
+
+A = np.array([[${a}, ${b}], [${c}, ${d}]])
+theta = np.deg2rad(${angle})
+v = np.array([np.cos(theta), np.sin(theta)])
+Av = A @ v
+
+cosine = np.dot(v, Av) / (np.linalg.norm(v) * np.linalg.norm(Av))
+angle_difference = np.rad2deg(np.arccos(np.clip(abs(cosine), -1, 1)))
+length_scale = np.linalg.norm(Av) / np.linalg.norm(v)
+lambda_estimate = np.dot(Av, v) / np.dot(v, v)
+
+if angle_difference < 1.0:
+    print("Eigenvector", lambda_estimate)
+else:
+    print("Ordinary vector")
+
+# Power iteration discovers a dominant magic direction.
+for _ in range(8):
+    v = A @ v
+    v = v / np.linalg.norm(v)`;
+  },
+  javascript: (params) => {
+    const a = numberParam(params, "magicA", 1.65).toFixed(2);
+    const b = numberParam(params, "magicB", 0.75).toFixed(2);
+    const c = numberParam(params, "magicC", 0.45).toFixed(2);
+    const d = numberParam(params, "magicD", 1.05).toFixed(2);
+    const angle = numberParam(params, "magicAngle", 32).toFixed(0);
+
+    return `const A = [[${a}, ${b}], [${c}, ${d}]];
+const theta = (${angle} * Math.PI) / 180;
+let v = { x: Math.cos(theta), y: Math.sin(theta) };
+
+function apply(A, vector) {
+  return {
+    x: A[0][0] * vector.x + A[0][1] * vector.y,
+    y: A[1][0] * vector.x + A[1][1] * vector.y,
+  };
+}
+
+const Av = apply(A, v);
+const dot = v.x * Av.x + v.y * Av.y;
+const lengthScale = Math.hypot(Av.x, Av.y) / Math.hypot(v.x, v.y);
+const cosine = dot / (Math.hypot(v.x, v.y) * Math.hypot(Av.x, Av.y));
+const angleDifference = Math.acos(Math.min(1, Math.abs(cosine))) * 180 / Math.PI;
+const eigenvalue = dot / (v.x ** 2 + v.y ** 2);
+
+for (let step = 0; step < 8; step += 1) {
+  v = apply(A, v);
+  const norm = Math.hypot(v.x, v.y) || 1;
+  v = { x: v.x / norm, y: v.y / norm };
+}`;
+  },
+});
+
+function makeEigenDirectionState(
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  angleDegrees: number,
+  showAll: boolean,
+  animationStep: number,
+  powerStep: number,
+) {
+  const testVector = {
+    x: Math.cos((angleDegrees * Math.PI) / 180),
+    y: Math.sin((angleDegrees * Math.PI) / 180),
+  };
+  const transformedVector = determinantTransformPoint(a, b, c, d, testVector.x, testVector.y);
+  const transformedNorm = Math.max(1e-8, Math.hypot(transformedVector.x, transformedVector.y));
+  const normalizedTransformedVector = {
+    x: transformedVector.x / transformedNorm,
+    y: transformedVector.y / transformedNorm,
+  };
+  const dot = testVector.x * transformedVector.x + testVector.y * transformedVector.y;
+  const cosine = Math.max(-1, Math.min(1, dot / transformedNorm));
+  const angleDifference = (Math.acos(Math.abs(cosine)) * 180) / Math.PI;
+  const eigenvalueEstimate = dot;
+  const phase = (["matrix", "transform", "compare", "decision", "result"] as const)[
+    ((animationStep % 5) + 5) % 5
+  ];
+  const determinant = a * d - b * c;
+  const trace = a + d;
+
+  return {
+    matrix: [
+      [a, b],
+      [c, d],
+    ],
+    testVector,
+    transformedVector,
+    normalizedTransformedVector,
+    angleDegrees,
+    angleDifference,
+    lengthScale: transformedNorm,
+    eigenvalueEstimate,
+    isEigenvector: angleDifference < 1.25,
+    isReversed: cosine < 0,
+    showAll,
+    phase,
+    eigenvalues: determinantEigenvalues(a, b, c, d, determinant, trace),
+    powerPath: makePowerIterationPath(a, b, c, d, testVector, powerStep),
+  };
+}
+
+function makePowerIterationPath(a: number, b: number, c: number, d: number, start: DataPoint, steps: number) {
+  const path = [{ x: start.x, y: start.y }];
+  let current = { x: start.x, y: start.y };
+  for (let index = 0; index < Math.max(0, steps); index += 1) {
+    const next = determinantTransformPoint(a, b, c, d, current.x, current.y);
+    const norm = Math.max(1e-8, Math.hypot(next.x, next.y));
+    current = { x: next.x / norm, y: next.y / norm };
+    path.push(current);
+  }
+  return path;
+}
+
 const modelEvaluation = barAlgorithm({
   id: "model-evaluation",
   name: "Metrics & Cross-Validation",
@@ -7457,6 +7643,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   singularValueDecomposition,
   nonNegativeMatrixFactorizationLesson,
   determinantVisualizer,
+  findMagicDirections,
   convexOptimization,
   convolutionsFromScratch,
   neuralNetwork,

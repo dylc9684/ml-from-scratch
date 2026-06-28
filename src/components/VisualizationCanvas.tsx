@@ -47,6 +47,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const [size, setSize] = useState<Size>({ width: 820, height: 420 });
   const [polynomialHoverIndex, setPolynomialHoverIndex] = useState<number | null>(null);
   const [determinantDrag, setDeterminantDrag] = useState<"basisI" | "basisJ" | null>(null);
+  const [eigenDirectionDrag, setEigenDirectionDrag] = useState(false);
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
   const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);
@@ -57,6 +58,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isNmfLesson = frame?.type === "concept-demo" && Boolean(frame.nmf);
   const isPolynomialLesson = frame?.type === "concept-demo" && Boolean(frame.polynomial);
   const isDeterminantLesson = frame?.type === "concept-demo" && Boolean(frame.determinant);
+  const isEigenDirectionLesson = frame?.type === "concept-demo" && Boolean(frame.eigenDirection);
   const isRegularizationLesson = frame?.type === "concept-demo" && Boolean(frame.regularization);
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
@@ -171,6 +173,24 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       return;
     }
 
+    if (frame?.type === "concept-demo" && frame.eigenDirection && eigenDirectionDrag && onParamChange) {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const bounds = canvas.getBoundingClientRect();
+      const point = {
+        x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
+        y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
+      };
+      const angle = canvasPointToEigenDirectionAngle(frame.eigenDirection, size, point);
+      if (angle !== null) {
+        onParamChange("magicAngle", angle);
+      }
+      return;
+    }
+
     if (frame?.type !== "concept-demo" || !frame.polynomial) {
       if (polynomialHoverIndex !== null) {
         setPolynomialHoverIndex(null);
@@ -195,7 +215,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   };
 
   const handleCanvasMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (frame?.type !== "concept-demo" || !frame.determinant || !params || !onParamChange) {
+    if (frame?.type !== "concept-demo" || !params || !onParamChange) {
       return;
     }
 
@@ -209,9 +229,21 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
       y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
     };
-    const handle = hitTestDeterminantHandle(frame.determinant, size, point);
-    if (handle) {
-      setDeterminantDrag(handle);
+
+    if (frame.determinant) {
+      const handle = hitTestDeterminantHandle(frame.determinant, size, point);
+      if (handle) {
+        setDeterminantDrag(handle);
+      }
+      return;
+    }
+
+    if (frame.eigenDirection) {
+      const angle = canvasPointToEigenDirectionAngle(frame.eigenDirection, size, point);
+      if (angle !== null) {
+        setEigenDirectionDrag(true);
+        onParamChange("magicAngle", angle);
+      }
     }
   };
 
@@ -232,6 +264,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       } ${
         isDeterminantLesson ? "determinant-shell" : ""
       } ${
+        isEigenDirectionLesson ? "eigen-direction-shell" : ""
+      } ${
         isRegularizationLesson ? "regularization-shell" : ""
       } ${
         isConvexLesson ? "convex-shell" : ""
@@ -250,10 +284,14 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
         onClick={handleCanvasClick}
         onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleCanvasMove}
-        onMouseUp={() => setDeterminantDrag(null)}
+        onMouseUp={() => {
+          setDeterminantDrag(null);
+          setEigenDirectionDrag(false);
+        }}
         onMouseLeave={() => {
           setPolynomialHoverIndex(null);
           setDeterminantDrag(null);
+          setEigenDirectionDrag(false);
         }}
       />
       <div className="canvas-readout">
@@ -343,6 +381,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.determinant) {
     paintDeterminantLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.eigenDirection) {
+    paintEigenDirectionLesson(context, frame, size);
     return;
   }
 
@@ -3794,6 +3837,600 @@ function canvasPointToDeterminantVector(
     x: Math.max(-3, Math.min(3, Number(x.invert(point.x).toFixed(2)))),
     y: Math.max(-3, Math.min(3, Number(y.invert(point.y).toFixed(2)))),
   };
+}
+
+function paintEigenDirectionLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const eigenDirection = frame.eigenDirection;
+  if (!eigenDirection) {
+    return;
+  }
+
+  const layout = eigenDirectionLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Find the magic directions", layout.headerPane.x, layout.headerPane.y - 24);
+  context.fillText("Grid and transformation", layout.gridPane.x, layout.gridPane.y - 24);
+  context.fillText("Direction wheel", layout.wheelPane.x, layout.wheelPane.y - 24);
+
+  paintEigenDirectionHeader(context, eigenDirection, layout.headerPane);
+  paintEigenDirectionGrid(context, eigenDirection, layout.gridPane);
+  paintEigenDirectionWheel(context, eigenDirection, layout.wheelPane);
+  paintEigenDirectionMetrics(context, eigenDirection, layout.metricsPane);
+}
+
+function eigenDirectionLayout(size: Size) {
+  const narrow = size.width < 860;
+  const padding = 24;
+  const gap = 18;
+  const headerPane: CanvasPane = { x: padding, y: 58, width: size.width - padding * 2, height: narrow ? 142 : 116 };
+  const top = headerPane.y + headerPane.height + 56;
+  const metricsHeight = narrow ? 154 : 98;
+  const availableHeight = Math.max(300, size.height - top - metricsHeight - 42);
+  const gridPane: CanvasPane = narrow
+    ? { x: padding, y: top, width: size.width - padding * 2, height: Math.max(320, availableHeight * 0.54) }
+    : { x: padding, y: top, width: Math.max(500, size.width * 0.58), height: availableHeight };
+  const wheelPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: gridPane.y + gridPane.height + gap + 32,
+        width: size.width - padding * 2,
+        height: Math.max(280, availableHeight * 0.46),
+      }
+    : {
+        x: gridPane.x + gridPane.width + gap,
+        y: top,
+        width: size.width - padding * 2 - gridPane.width - gap,
+        height: availableHeight,
+      };
+  const metricsPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: wheelPane.y + wheelPane.height + gap,
+        width: size.width - padding * 2,
+        height: metricsHeight,
+      }
+    : {
+        x: padding,
+        y: gridPane.y + gridPane.height + gap,
+        width: size.width - padding * 2,
+        height: metricsHeight,
+      };
+
+  return { headerPane, gridPane, wheelPane, metricsPane };
+}
+
+function paintEigenDirectionHeader(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const matrixBox = {
+    x: pane.x + 14,
+    y: pane.y + 18,
+    width: Math.min(156, pane.width * 0.3),
+    height: pane.height - 36,
+  };
+  paintRoundedRect(context, matrixBox.x, matrixBox.y, matrixBox.width, matrixBox.height, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Matrix editor", matrixBox.x + 12, matrixBox.y + 18);
+  context.font = "900 17px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textAlign = "center";
+  eigenDirection.matrix.forEach((row, rowIndex) => {
+    row.forEach((value, columnIndex) => {
+      context.fillText(
+        formatEigenDirectionNumber(value),
+        matrixBox.x + matrixBox.width * (columnIndex === 0 ? 0.34 : 0.68),
+        matrixBox.y + 48 + rowIndex * 26,
+      );
+    });
+  });
+
+  const activeIndex = eigenDirectionPhaseIndex(eigenDirection.phase);
+  const flow = [
+    "Matrix",
+    "Apply Transformation",
+    "Compare Directions",
+    "Direction Preserved?",
+    eigenDirection.isEigenvector ? "Yes: Eigenvector" : "No: Ordinary Vector",
+  ];
+  const flowX = matrixBox.x + matrixBox.width + 18;
+  const flowY = pane.y + 24;
+  const flowWidth = pane.x + pane.width - flowX - 14;
+  const compact = flowWidth < 560;
+  const nodeWidth = compact ? Math.max(104, (flowWidth - 20) / 3) : (flowWidth - 52) / flow.length;
+  const nodeHeight = 36;
+
+  flow.forEach((label, index) => {
+    const row = compact ? Math.floor(index / 3) : 0;
+    const column = compact ? index % 3 : index;
+    const x = flowX + column * (nodeWidth + 10);
+    const y = flowY + row * 48;
+    const active = index === activeIndex;
+    paintRoundedRect(
+      context,
+      x,
+      y,
+      nodeWidth,
+      nodeHeight,
+      8,
+      active ? "#eef7f5" : "#ffffff",
+      active ? "#0f766e" : "#d8e0e5",
+    );
+    context.fillStyle = active ? "#0f766e" : "#61707f";
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(fitCanvasText(context, label, nodeWidth - 12), x + nodeWidth / 2, y + 22);
+
+    if (!compact && index < flow.length - 1) {
+      context.strokeStyle = "#aebbc4";
+      context.lineWidth = 1.6;
+      context.beginPath();
+      context.moveTo(x + nodeWidth + 3, y + nodeHeight / 2);
+      context.lineTo(x + nodeWidth + 9, y + nodeHeight / 2);
+      context.stroke();
+    }
+  });
+
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(context, eigenDirectionPhaseCopy(eigenDirection), flowWidth),
+    flowX,
+    pane.y + pane.height - 18,
+  );
+  context.restore();
+}
+
+function paintEigenDirectionGrid(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+  const { plot, x, y } = eigenDirectionScales(eigenDirection, pane);
+  const statusColor = eigenDirectionStatusColor(eigenDirection);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Drag the blue vector", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, "Most directions rotate. Magic directions stay on the same line after A is applied.", pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  context.fillStyle = "rgba(247, 250, 252, 0.94)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  paintEigenOriginalGrid(context, plot, x, y);
+  paintEigenTransformedGrid(context, eigenDirection, x, y);
+  paintDeterminantAxes(context, plot, x, y);
+
+  if (eigenDirection.showAll) {
+    paintEigenDirectionLines(context, eigenDirection, plot, x, y);
+  }
+
+  if (eigenDirection.powerPath.length > 1) {
+    context.strokeStyle = "rgba(183, 121, 31, 0.78)";
+    context.lineWidth = 2;
+    context.beginPath();
+    eigenDirection.powerPath.forEach((point, index) => {
+      const px = x(point.x * 1.5);
+      const py = y(point.y * 1.5);
+      if (index === 0) {
+        context.moveTo(px, py);
+      } else {
+        context.lineTo(px, py);
+      }
+    });
+    context.stroke();
+    eigenDirection.powerPath.forEach((point, index) => {
+      context.fillStyle = index === eigenDirection.powerPath.length - 1 ? "#b7791f" : "rgba(183, 121, 31, 0.45)";
+      context.beginPath();
+      context.arc(x(point.x * 1.5), y(point.y * 1.5), index === eigenDirection.powerPath.length - 1 ? 5 : 3, 0, Math.PI * 2);
+      context.fill();
+    });
+  }
+
+  drawEigenDirectionArrow(context, x(0), y(0), x(eigenDirection.testVector.x * 1.55), y(eigenDirection.testVector.y * 1.55), "#2f6fbe", "v");
+  drawEigenDirectionArrow(context, x(0), y(0), x(eigenDirection.transformedVector.x), y(eigenDirection.transformedVector.y), statusColor, "Av");
+  context.restore();
+
+  const handleX = x(eigenDirection.testVector.x * 1.55);
+  const handleY = y(eigenDirection.testVector.y * 1.55);
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = "#2f6fbe";
+  context.lineWidth = 3;
+  context.beginPath();
+  context.arc(handleX, handleY, 9, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+
+  context.restore();
+}
+
+function paintEigenDirectionWheel(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+  const statusColor = eigenDirectionStatusColor(eigenDirection);
+  const wheel = eigenDirectionWheelGeometry(pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Before and after directions", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, "If blue and after-A land on the same line, the vector is an eigenvector.", pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1.4;
+  context.beginPath();
+  context.arc(wheel.cx, wheel.cy, wheel.radius, 0, Math.PI * 2);
+  context.stroke();
+  context.strokeStyle = "rgba(100, 116, 139, 0.26)";
+  context.beginPath();
+  context.moveTo(wheel.cx - wheel.radius, wheel.cy);
+  context.lineTo(wheel.cx + wheel.radius, wheel.cy);
+  context.moveTo(wheel.cx, wheel.cy - wheel.radius);
+  context.lineTo(wheel.cx, wheel.cy + wheel.radius);
+  context.stroke();
+
+  if (eigenDirection.showAll) {
+    eigenDirection.eigenvalues.forEach((eigenvalue) => {
+      if (!eigenvalue.vector || Math.abs(eigenvalue.imaginary) > 1e-7) {
+        return;
+      }
+      context.strokeStyle = eigenvalue.color;
+      context.lineWidth = 2.2;
+      context.setLineDash([7, 5]);
+      context.beginPath();
+      context.moveTo(wheel.cx - eigenvalue.vector.x * wheel.radius, wheel.cy + eigenvalue.vector.y * wheel.radius);
+      context.lineTo(wheel.cx + eigenvalue.vector.x * wheel.radius, wheel.cy - eigenvalue.vector.y * wheel.radius);
+      context.stroke();
+      context.setLineDash([]);
+    });
+  }
+
+  const beforeAngle = Math.atan2(eigenDirection.testVector.y, eigenDirection.testVector.x);
+  const afterAngle = Math.atan2(eigenDirection.normalizedTransformedVector.y, eigenDirection.normalizedTransformedVector.x);
+  context.strokeStyle = "rgba(183, 121, 31, 0.46)";
+  context.lineWidth = 4;
+  context.beginPath();
+  context.arc(wheel.cx, wheel.cy, Math.max(18, wheel.radius * 0.34), -beforeAngle, -afterAngle, afterAngle > beforeAngle);
+  context.stroke();
+
+  drawEigenWheelVector(context, wheel, eigenDirection.testVector, "#2f6fbe", "v");
+  drawEigenWheelVector(context, wheel, eigenDirection.normalizedTransformedVector, statusColor, "Av");
+
+  const statusText = eigenDirection.isEigenvector
+    ? eigenDirection.isReversed
+      ? "Status: Eigenvector, reversed"
+      : "Status: Eigenvector"
+    : "Status: Ordinary vector";
+  const cardY = pane.y + pane.height - 86;
+  paintRoundedRect(context, pane.x + 14, cardY, pane.width - 28, 68, 8, eigenDirection.isEigenvector ? "#eef7f5" : "#fff7f6", `${statusColor}66`);
+  context.fillStyle = statusColor;
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(statusText, pane.x + 28, cardY + 22);
+  context.fillStyle = "#61707f";
+  context.font = "800 11px Inter, system-ui, sans-serif";
+  wrapCanvasText(
+    context,
+    `Angle difference ${eigenDirection.angleDifference.toFixed(2)} deg · length scale ${eigenDirection.lengthScale.toFixed(2)}x · lambda estimate ${eigenDirection.eigenvalueEstimate.toFixed(3)}`,
+    pane.x + 28,
+    cardY + 42,
+    pane.width - 56,
+    14,
+    2,
+  );
+  context.restore();
+}
+
+function paintEigenDirectionMetrics(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+  const statusColor = eigenDirectionStatusColor(eigenDirection);
+  const cards = [
+    { label: "Angle Difference", value: `${eigenDirection.angleDifference.toFixed(2)} deg` },
+    { label: "Length Scale", value: `${eigenDirection.lengthScale.toFixed(2)}x` },
+    { label: "Status", value: eigenDirection.isEigenvector ? "Eigenvector" : "Ordinary Vector" },
+    { label: "Eigenvalue", value: eigenDirection.isEigenvector ? eigenDirection.eigenvalueEstimate.toFixed(3) : "not aligned" },
+  ];
+  const compact = pane.width < 720;
+  const columns = compact ? 2 : 4;
+  const gap = 10;
+  const cardWidth = (pane.width - 28 - gap * (columns - 1)) / columns;
+  cards.forEach((card, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = pane.x + 14 + column * (cardWidth + gap);
+    const y = pane.y + 14 + row * 52;
+    paintRoundedRect(context, x, y, cardWidth, 42, 8, "#ffffff", index === 2 ? statusColor : "#d8e0e5");
+    context.fillStyle = "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(card.label, x + 10, y + 15);
+    context.fillStyle = index === 2 ? statusColor : "#17212b";
+    context.font = "900 12px Inter, system-ui, sans-serif";
+    context.fillText(fitCanvasText(context, card.value, cardWidth - 20), x + 10, y + 32);
+  });
+
+  if (!compact) {
+    const buttonY = pane.y + pane.height - 30;
+    const labels = ["Animate", "Power Iteration", "Show All Eigenvectors", "Reset"];
+    let x = pane.x + 14;
+    labels.forEach((label, index) => {
+      const width = Math.min(150, Math.max(70, context.measureText(label).width + 24));
+      paintRoundedRect(context, x, buttonY, width, 20, 8, index === 2 && eigenDirection.showAll ? "#eef7f5" : "#f7fafc", index === 2 && eigenDirection.showAll ? "#0f766e" : "#d8e0e5");
+      context.fillStyle = index === 2 && eigenDirection.showAll ? "#0f766e" : "#61707f";
+      context.font = "900 9px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText(label, x + width / 2, buttonY + 14);
+      x += width + 8;
+    });
+  }
+
+  context.restore();
+}
+
+function eigenDirectionScales(
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  pane: CanvasPane,
+) {
+  const plot = {
+    x: pane.x + 44,
+    y: pane.y + 64,
+    width: pane.width - 74,
+    height: pane.height - 96,
+  };
+  const coordinates = [
+    eigenDirection.testVector,
+    eigenDirection.transformedVector,
+    ...eigenDirection.powerPath.map((point) => ({ x: point.x * 1.5, y: point.y * 1.5 })),
+    { x: eigenDirection.matrix[0][0], y: eigenDirection.matrix[1][0] },
+    { x: eigenDirection.matrix[0][1], y: eigenDirection.matrix[1][1] },
+  ];
+  const limit = Math.max(3.1, ...coordinates.flatMap((point) => [Math.abs(point.x), Math.abs(point.y)])) + 0.35;
+  return {
+    plot,
+    limit,
+    x: d3.scaleLinear().domain([-limit, limit]).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain([-limit, limit]).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintEigenOriginalGrid(
+  context: CanvasRenderingContext2D,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  context.strokeStyle = "rgba(100, 116, 139, 0.16)";
+  context.lineWidth = 1;
+  d3.range(-4, 4.1, 1).forEach((tick) => {
+    context.beginPath();
+    context.moveTo(x(tick), plot.y);
+    context.lineTo(x(tick), plot.y + plot.height);
+    context.moveTo(plot.x, y(tick));
+    context.lineTo(plot.x + plot.width, y(tick));
+    context.stroke();
+  });
+}
+
+function paintEigenTransformedGrid(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  const [[a, b], [c, d]] = eigenDirection.matrix;
+  context.strokeStyle = "rgba(47, 111, 190, 0.24)";
+  context.lineWidth = 1.2;
+  d3.range(-5, 5.1, 1).forEach((tick) => {
+    const verticalA = determinantTransformForCanvas(a, b, c, d, tick, -5);
+    const verticalB = determinantTransformForCanvas(a, b, c, d, tick, 5);
+    const horizontalA = determinantTransformForCanvas(a, b, c, d, -5, tick);
+    const horizontalB = determinantTransformForCanvas(a, b, c, d, 5, tick);
+    context.beginPath();
+    context.moveTo(x(verticalA.x), y(verticalA.y));
+    context.lineTo(x(verticalB.x), y(verticalB.y));
+    context.moveTo(x(horizontalA.x), y(horizontalA.y));
+    context.lineTo(x(horizontalB.x), y(horizontalB.y));
+    context.stroke();
+  });
+}
+
+function paintEigenDirectionLines(
+  context: CanvasRenderingContext2D,
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  eigenDirection.eigenvalues.forEach((eigenvalue) => {
+    if (!eigenvalue.vector || Math.abs(eigenvalue.imaginary) > 1e-7) {
+      return;
+    }
+    const span = 5;
+    context.strokeStyle = eigenvalue.color;
+    context.lineWidth = 2.2;
+    context.setLineDash([8, 5]);
+    context.beginPath();
+    context.moveTo(x(-eigenvalue.vector.x * span), y(-eigenvalue.vector.y * span));
+    context.lineTo(x(eigenvalue.vector.x * span), y(eigenvalue.vector.y * span));
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = eigenvalue.color;
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(eigenvalue.label, Math.min(plot.x + plot.width - 54, x(eigenvalue.vector.x * 2.5) + 6), y(eigenvalue.vector.y * 2.5) - 6);
+  });
+}
+
+function drawEigenDirectionArrow(
+  context: CanvasRenderingContext2D,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  color: string,
+  label: string,
+) {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(fromX, fromY);
+  context.lineTo(toX, toY);
+  context.stroke();
+  context.translate(toX, toY);
+  context.rotate(angle);
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(-11, -5);
+  context.lineTo(-11, 5);
+  context.closePath();
+  context.fill();
+  context.rotate(-angle);
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, 10, -8);
+  context.restore();
+}
+
+function eigenDirectionWheelGeometry(pane: CanvasPane) {
+  const radius = Math.max(72, Math.min(pane.width, pane.height - 150) * 0.32);
+  return {
+    cx: pane.x + pane.width / 2,
+    cy: pane.y + Math.max(142, pane.height * 0.48),
+    radius,
+  };
+}
+
+function drawEigenWheelVector(
+  context: CanvasRenderingContext2D,
+  wheel: { cx: number; cy: number; radius: number },
+  vector: DataPoint,
+  color: string,
+  label: string,
+) {
+  const toX = wheel.cx + vector.x * wheel.radius;
+  const toY = wheel.cy - vector.y * wheel.radius;
+  drawEigenDirectionArrow(context, wheel.cx, wheel.cy, toX, toY, color, label);
+}
+
+function canvasPointToEigenDirectionAngle(
+  eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const layout = eigenDirectionLayout(size);
+  const { plot, x, y } = eigenDirectionScales(eigenDirection, layout.gridPane);
+  if (
+    point.x >= plot.x &&
+    point.x <= plot.x + plot.width &&
+    point.y >= plot.y &&
+    point.y <= plot.y + plot.height
+  ) {
+    const dataX = x.invert(point.x);
+    const dataY = y.invert(point.y);
+    if (Math.hypot(dataX, dataY) > 0.18) {
+      return normalizeAngleDegrees((Math.atan2(dataY, dataX) * 180) / Math.PI);
+    }
+  }
+
+  const wheel = eigenDirectionWheelGeometry(layout.wheelPane);
+  const dx = point.x - wheel.cx;
+  const dy = wheel.cy - point.y;
+  if (Math.hypot(dx, dy) <= wheel.radius + 24 && Math.hypot(dx, dy) >= 18) {
+    return normalizeAngleDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
+  }
+
+  return null;
+}
+
+function normalizeAngleDegrees(angle: number) {
+  const normalized = ((angle + 180) % 360 + 360) % 360 - 180;
+  return Math.round(normalized);
+}
+
+function eigenDirectionPhaseIndex(phase: NonNullable<ConceptFrame["eigenDirection"]>["phase"]) {
+  return {
+    matrix: 0,
+    transform: 1,
+    compare: 2,
+    decision: 3,
+    result: 4,
+  }[phase];
+}
+
+function eigenDirectionPhaseCopy(eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>) {
+  if (eigenDirection.phase === "matrix") {
+    return "Start with a matrix A and a draggable test vector v.";
+  }
+  if (eigenDirection.phase === "transform") {
+    return "Apply the matrix: A sends v to a new vector Av.";
+  }
+  if (eigenDirection.phase === "compare") {
+    return "Compare the before and after directions on the wheel.";
+  }
+  if (eigenDirection.phase === "decision") {
+    return eigenDirection.isEigenvector
+      ? "Direction preserved: v stays on the same line."
+      : "Direction changed: this vector is ordinary.";
+  }
+  return eigenDirection.isEigenvector
+    ? "Yes: Av = lambda v, so this is an eigenvector."
+    : "No: drag closer to a dashed eigen-line to find a magic direction.";
+}
+
+function eigenDirectionStatusColor(eigenDirection: NonNullable<ConceptFrame["eigenDirection"]>) {
+  return eigenDirection.isEigenvector ? "#0f766e" : "#d34a43";
+}
+
+function formatEigenDirectionNumber(value: number) {
+  if (Math.abs(value) < 0.001) {
+    return "0.00";
+  }
+  return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
 }
 
 function paintCanvasPanel(

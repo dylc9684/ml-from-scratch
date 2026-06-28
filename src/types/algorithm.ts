@@ -635,6 +635,30 @@ export type DeterminantState = {
   eigenvalues: DeterminantEigenvalue[];
 };
 
+export type EigenDirectionPhase =
+  | "matrix"
+  | "transform"
+  | "compare"
+  | "decision"
+  | "result";
+
+export type EigenDirectionState = {
+  matrix: MatrixParameterValue;
+  testVector: DataPoint;
+  transformedVector: DataPoint;
+  normalizedTransformedVector: DataPoint;
+  angleDegrees: number;
+  angleDifference: number;
+  lengthScale: number;
+  eigenvalueEstimate: number;
+  isEigenvector: boolean;
+  isReversed: boolean;
+  showAll: boolean;
+  phase: EigenDirectionPhase;
+  eigenvalues: DeterminantEigenvalue[];
+  powerPath: DataPoint[];
+};
+
 export type RegularizationMethod = "ridge" | "lasso";
 
 export type RegularizationWeight = {
@@ -814,6 +838,7 @@ export type ConceptFrame = {
   nmf?: NmfState;
   polynomial?: PolynomialState;
   determinant?: DeterminantState;
+  eigenDirection?: EigenDirectionState;
   regularization?: RegularizationState;
   convex?: ConvexState;
   convolution?: ConvolutionState;

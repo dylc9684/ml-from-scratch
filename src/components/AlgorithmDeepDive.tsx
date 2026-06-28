@@ -351,6 +351,37 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "For any square matrix, the determinant equals the product of eigenvalues, counting complex eigenvalues too.",
     ],
   },
+  "find-magic-directions": {
+    graphTitle: "What the magic-direction interface is showing",
+    graphNotes: [
+      "The blue vector is a test direction v. The after-vector Av shows what the matrix does to it.",
+      "Most vectors change direction, but eigenvectors stay on the same line and only scale or reverse.",
+      "Power iteration repeatedly applies A and often drifts toward the strongest preserved direction.",
+    ],
+    complexity: {
+      time: "O(1) for a 2x2 closed-form check; O(t d^2) for power iteration on a d by d matrix.",
+      prediction: "O(d^2) to multiply one vector by a dense matrix.",
+      space: "O(d) for the current vector, or O(t d) if every power-iteration step is stored.",
+      plainEnglish:
+        "For this 2D demo, everything is tiny. In larger systems the cost is dominated by repeated matrix-vector multiplication.",
+      terms: [
+        { label: "dimension d", weight: 78 },
+        { label: "iterations t", weight: 58 },
+        { label: "matrix multiply d^2", weight: 72 },
+      ],
+    },
+    realWorld: [
+      "Principal component analysis, PageRank-style ranking, vibration modes, stability analysis, and spectral clustering.",
+      "Understanding why some transformations have natural axes or dominant directions.",
+      "Diagnosing neural-network weight matrices, covariance matrices, and linear dynamical systems.",
+    ],
+    keyDetails: [
+      "An eigenvector is about direction, not position. Any nonzero scalar multiple of an eigenvector is still an eigenvector.",
+      "A negative eigenvalue means the vector reverses direction while staying on the same line.",
+      "Complex eigenvalues mean no real direction is preserved in the simple arrow-line sense.",
+      "The determinant equals the product of eigenvalues, tying this lesson back to area scaling.",
+    ],
+  },
   "building-tokenizer": {
     graphTitle: "What the tokenizer graph is showing",
     graphNotes: [
