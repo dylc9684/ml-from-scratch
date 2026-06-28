@@ -1,4 +1,3 @@
-import * as tf from "@tensorflow/tfjs";
 import { makeRegressionDataset } from "../data/datasets";
 import type {
   AlgorithmDefinition,
@@ -158,7 +157,7 @@ function runLinearRegression(
     return {
       frames: [],
       metrics: [{ label: "Rows", value: "0 usable" }],
-      runtime: "TensorFlow.js",
+      runtime: "JavaScript",
     };
   }
 
@@ -179,7 +178,7 @@ function runLinearRegression(
         points,
         slope,
         intercept,
-        loss: mseWithTensorFlow(points, slope, intercept),
+        loss: meanSquaredError(points, slope, intercept),
       });
     }
 
@@ -200,7 +199,7 @@ function runLinearRegression(
       : 0;
   }
 
-  const finalLoss = mseWithTensorFlow(points, slope, intercept);
+  const finalLoss = meanSquaredError(points, slope, intercept);
 
   return {
     frames,
@@ -210,20 +209,19 @@ function runLinearRegression(
       { label: "Intercept", value: intercept.toFixed(3) },
       { label: "Frames", value: String(frames.length) },
     ],
-    runtime: "TensorFlow.js",
+    runtime: "JavaScript",
   };
 }
 
-function mseWithTensorFlow(
+function meanSquaredError(
   points: DataPoint[],
   slope: number,
   intercept: number,
 ) {
-  return tf.tidy(() => {
-    const xs = tf.tensor1d(points.map((point) => point.x));
-    const ys = tf.tensor1d(points.map((point) => point.y));
-    const predictions = tf.add(tf.mul(xs, slope), intercept);
-    const loss = tf.mean(tf.square(tf.sub(predictions, ys)));
-    return loss.dataSync()[0];
-  });
+  return (
+    points.reduce((sum, point) => {
+      const error = slope * point.x + intercept - point.y;
+      return sum + error ** 2;
+    }, 0) / Math.max(1, points.length)
+  );
 }

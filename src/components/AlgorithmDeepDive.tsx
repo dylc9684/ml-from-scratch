@@ -11,12 +11,12 @@ type Props = {
   metrics: Metric[];
 };
 
-type ComplexityTerm = {
+export type ComplexityTerm = {
   label: string;
   weight: number;
 };
 
-type DeepDiveContent = {
+export type DeepDiveContent = {
   graphTitle: string;
   graphNotes: string[];
   complexity: {
@@ -134,7 +134,7 @@ export function AlgorithmDeepDive({ algorithm, frame, metrics }: Props) {
   );
 }
 
-function getDeepDiveContent(algorithm: AlgorithmDefinition) {
+export function getDeepDiveContent(algorithm: AlgorithmDefinition) {
   return (
     deepDiveById[algorithm.id] ??
     deepDiveByCategory[algorithm.category] ??
@@ -142,7 +142,7 @@ function getDeepDiveContent(algorithm: AlgorithmDefinition) {
   );
 }
 
-function frameSummary(frame: AlgorithmFrame | null) {
+export function frameSummary(frame: AlgorithmFrame | null) {
   if (!frame) {
     return "Run the algorithm to generate a live summary.";
   }

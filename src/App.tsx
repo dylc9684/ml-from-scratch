@@ -19,6 +19,7 @@ import { ConceptGraph } from "./components/ConceptGraph";
 import { DatasetPanel } from "./components/DatasetPanel";
 import { EducationPanel } from "./components/EducationPanel";
 import { AlgorithmDeepDive } from "./components/AlgorithmDeepDive";
+import { LessonGuide } from "./components/LessonGuide";
 import { MetricsGrid } from "./components/MetricsGrid";
 import { ParameterControls } from "./components/ParameterControls";
 import { VisualizationCanvas } from "./components/VisualizationCanvas";
@@ -31,7 +32,7 @@ import type {
   RawDataset,
 } from "./types/algorithm";
 
-type Panel = "controls" | "data" | "math" | "code";
+type SecondaryPanel = "map" | "data" | "math" | "code" | "deepDive";
 
 export default function App() {
   const [query, setQuery] = useState("");
@@ -44,7 +45,8 @@ export default function App() {
   const [params, setParams] = useState<ParameterState>(() =>
     makeDefaultParams(activeAlgorithm),
   );
-  const [activePanel, setActivePanel] = useState<Panel>("controls");
+  const [activePanel, setActivePanel] = useState<SecondaryPanel>("map");
+  const [recentIds, setRecentIds] = useState<string[]>(() => [algorithms[0].id]);
   const [rawDataset, setRawDataset] = useState<RawDataset | null>(null);
   const [uploadIssues, setUploadIssues] = useState<DatasetIssue[]>([]);
   const [mapping, setMapping] = useState<DatasetMapping>(() => ({
@@ -102,6 +104,10 @@ export default function App() {
     setIsPlaying(false);
   }, [activeAlgorithm]);
 
+  useEffect(() => {
+    setRecentIds((current) => [activeAlgorithm.id, ...current.filter((id) => id !== activeAlgorithm.id)].slice(0, 6));
+  }, [activeAlgorithm.id]);
+
   const runAlgorithm = useCallback(() => {
     const result = activeAlgorithm.engine(engineDataset, params);
     setEngineResult(result);
@@ -150,7 +156,7 @@ export default function App() {
 
   const handleAlgorithmSelect = (id: string) => {
     setActiveId(id);
-    setActivePanel("controls");
+    setActivePanel("map");
   };
 
   const handleParamChange = (key: string, value: ParameterValue) => {
@@ -294,6 +300,7 @@ export default function App() {
           algorithms={algorithms}
           activeId={activeAlgorithm.id}
           query={query}
+          recentIds={recentIds}
           onSelect={handleAlgorithmSelect}
         />
 
@@ -314,23 +321,56 @@ export default function App() {
             </div>
           </div>
 
-          <ConceptGraph
-            algorithms={algorithms}
-            activeId={activeAlgorithm.id}
-            onSelect={handleAlgorithmSelect}
+          <LessonGuide
+            algorithm={activeAlgorithm}
+            frame={currentFrame}
+            metrics={engineResult.metrics}
+            onOpenPanel={setActivePanel}
           />
 
-          <section className="playground-grid" aria-label="Interactive playground">
-            <VisualizationCanvas
-              frame={currentFrame}
-              algorithm={activeAlgorithm}
-              params={params}
-              onParamChange={handleParamChange}
-            />
+          <section className="primary-workspace" aria-label="Primary lesson playground">
+            <div className="visual-column">
+              <VisualizationCanvas
+                frame={currentFrame}
+                algorithm={activeAlgorithm}
+                params={params}
+                onParamChange={handleParamChange}
+              />
+            </div>
 
-            <aside className="side-panel">
-              <div className="tabbar" role="tablist" aria-label="Playground panels">
-                {(["controls", "data", "math", "code"] as Panel[]).map((panel) => (
+            <aside className="primary-rail" aria-label="Controls and key metrics">
+              <section className="primary-card controls-card" aria-label="Lesson controls">
+                <div className="primary-card-heading">
+                  <span className="eyebrow">Controls</span>
+                  <h3>Change the model</h3>
+                </div>
+                <ParameterControls
+                  algorithm={activeAlgorithm}
+                  params={params}
+                  autoRun={autoRun}
+                  onAutoRunChange={setAutoRun}
+                  onChange={handleParamChange}
+                />
+              </section>
+
+              <section className="primary-card metrics-card" aria-label="Key metrics">
+                <div className="primary-card-heading">
+                  <span className="eyebrow">Key Metrics</span>
+                  <h3>Watch these move</h3>
+                </div>
+                <MetricsGrid metrics={engineResult.metrics} />
+              </section>
+            </aside>
+          </section>
+
+          <section className="secondary-learning" aria-label="Secondary lesson materials">
+            <div className="secondary-learning-header">
+              <div>
+                <span className="eyebrow">Study Tabs</span>
+                <h3>Go deeper when the graph raises a question.</h3>
+              </div>
+              <div className="secondary-tabbar" role="tablist" aria-label="Lesson study panels">
+                {(["map", "data", "math", "code", "deepDive"] as SecondaryPanel[]).map((panel) => (
                   <button
                     key={panel}
                     className={`tab ${activePanel === panel ? "active" : ""}`}
@@ -339,19 +379,18 @@ export default function App() {
                     aria-selected={activePanel === panel}
                     onClick={() => setActivePanel(panel)}
                   >
-                    {panel}
+                    {panelLabel(panel)}
                   </button>
                 ))}
               </div>
+            </div>
 
-              <div className="side-scroll">
-                {activePanel === "controls" && (
-                  <ParameterControls
-                    algorithm={activeAlgorithm}
-                    params={params}
-                    autoRun={autoRun}
-                    onAutoRunChange={setAutoRun}
-                    onChange={handleParamChange}
+            <div className="secondary-panel-body">
+                {activePanel === "map" && (
+                  <ConceptGraph
+                    algorithms={algorithms}
+                    activeId={activeAlgorithm.id}
+                    onSelect={handleAlgorithmSelect}
                   />
                 )}
                 {activePanel === "data" && (
@@ -369,17 +408,36 @@ export default function App() {
                 {activePanel === "code" && (
                   <CodeViewer algorithm={activeAlgorithm} params={params} />
                 )}
-              </div>
-            </aside>
+                {activePanel === "deepDive" && (
+                  <AlgorithmDeepDive
+                    algorithm={activeAlgorithm}
+                    frame={currentFrame}
+                    metrics={engineResult.metrics}
+                  />
+                )}
+            </div>
           </section>
-          <AlgorithmDeepDive
-            algorithm={activeAlgorithm}
-            frame={currentFrame}
-            metrics={engineResult.metrics}
-          />
-          <MetricsGrid metrics={engineResult.metrics} />
         </main>
       </div>
     </div>
   );
+}
+
+function panelLabel(panel: SecondaryPanel) {
+  if (panel === "map") {
+    return "Concept Map";
+  }
+  if (panel === "data") {
+    return "Data";
+  }
+  if (panel === "math") {
+    return "Math";
+  }
+  if (panel === "code") {
+    return "Code";
+  }
+  if (panel === "deepDive") {
+    return "Deep Dive";
+  }
+  return "Panel";
 }
