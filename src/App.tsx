@@ -320,12 +320,58 @@ export default function App() {
             onSelect={handleAlgorithmSelect}
           />
 
-          <VisualizationCanvas
-            frame={currentFrame}
-            algorithm={activeAlgorithm}
-            params={params}
-            onParamChange={handleParamChange}
-          />
+          <section className="playground-grid" aria-label="Interactive playground">
+            <VisualizationCanvas
+              frame={currentFrame}
+              algorithm={activeAlgorithm}
+              params={params}
+              onParamChange={handleParamChange}
+            />
+
+            <aside className="side-panel">
+              <div className="tabbar" role="tablist" aria-label="Playground panels">
+                {(["controls", "data", "math", "code"] as Panel[]).map((panel) => (
+                  <button
+                    key={panel}
+                    className={`tab ${activePanel === panel ? "active" : ""}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activePanel === panel}
+                    onClick={() => setActivePanel(panel)}
+                  >
+                    {panel}
+                  </button>
+                ))}
+              </div>
+
+              <div className="side-scroll">
+                {activePanel === "controls" && (
+                  <ParameterControls
+                    algorithm={activeAlgorithm}
+                    params={params}
+                    autoRun={autoRun}
+                    onAutoRunChange={setAutoRun}
+                    onChange={handleParamChange}
+                  />
+                )}
+                {activePanel === "data" && (
+                  <DatasetPanel
+                    rawDataset={rawDataset}
+                    dataset={displayDataset}
+                    issues={datasetIssues}
+                    mapping={mapping}
+                    onMappingChange={setMapping}
+                    onUploadClick={() => fileInputRef.current?.click()}
+                    onUseSample={handleUseSample}
+                  />
+                )}
+                {activePanel === "math" && <EducationPanel algorithm={activeAlgorithm} />}
+                {activePanel === "code" && (
+                  <CodeViewer algorithm={activeAlgorithm} params={params} />
+                )}
+              </div>
+            </aside>
+          </section>
           <AlgorithmDeepDive
             algorithm={activeAlgorithm}
             frame={currentFrame}
@@ -333,50 +379,6 @@ export default function App() {
           />
           <MetricsGrid metrics={engineResult.metrics} />
         </main>
-
-        <aside className="side-panel">
-          <div className="tabbar" role="tablist" aria-label="Playground panels">
-            {(["controls", "data", "math", "code"] as Panel[]).map((panel) => (
-              <button
-                key={panel}
-                className={`tab ${activePanel === panel ? "active" : ""}`}
-                type="button"
-                role="tab"
-                aria-selected={activePanel === panel}
-                onClick={() => setActivePanel(panel)}
-              >
-                {panel}
-              </button>
-            ))}
-          </div>
-
-          <div className="side-scroll">
-            {activePanel === "controls" && (
-              <ParameterControls
-                algorithm={activeAlgorithm}
-                params={params}
-                autoRun={autoRun}
-                onAutoRunChange={setAutoRun}
-                onChange={handleParamChange}
-              />
-            )}
-            {activePanel === "data" && (
-              <DatasetPanel
-                rawDataset={rawDataset}
-                dataset={displayDataset}
-                issues={datasetIssues}
-                mapping={mapping}
-                onMappingChange={setMapping}
-                onUploadClick={() => fileInputRef.current?.click()}
-                onUseSample={handleUseSample}
-              />
-            )}
-            {activePanel === "math" && <EducationPanel algorithm={activeAlgorithm} />}
-            {activePanel === "code" && (
-              <CodeViewer algorithm={activeAlgorithm} params={params} />
-            )}
-          </div>
-        </aside>
       </div>
     </div>
   );
