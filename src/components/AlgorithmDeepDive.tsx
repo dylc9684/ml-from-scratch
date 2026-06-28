@@ -746,18 +746,18 @@ const deepDiveByCategory: Partial<Record<AlgorithmCategory, DeepDiveContent>> = 
     ],
   },
   "Singular Value Decomposition": {
-    graphTitle: "How to read the SVD panels",
+    graphTitle: "How to read the decomposition panels",
     graphNotes: [
-      "Large singular values capture broad structure; smaller ones add detail.",
-      "Low rank keeps only the most important components, so images sharpen as k grows.",
-      "The geometry view shows rotation, scaling, and another rotation.",
+      "The large matrix A splits into smaller factors whose product rebuilds the original signal.",
+      "Low rank keeps the broad background first; the residual panel shows details, edges, or motion left behind.",
+      "SVD factors can contain positive and negative rotations, while NMF factors stay nonnegative and read more like additive parts.",
     ],
     complexity: {
       time: "Roughly O(min(m n^2, m^2 n)) for a full SVD.",
-      prediction: "O(k(m+n)) to reconstruct a rank-k approximation.",
+      prediction: "O(k(m+n)) storage and roughly O(m n k) arithmetic to reconstruct a rank-k matrix.",
       space: "O(m n) for the matrix plus factors.",
       plainEnglish:
-        "Full SVD is expensive on large matrices, but truncated SVD keeps only the top k directions.",
+        "Full SVD is expensive on large matrices, but truncated factors let you keep the useful structure without storing every pixel or table entry.",
       terms: [
         { label: "rows m", weight: 72 },
         { label: "columns n", weight: 72 },
@@ -765,14 +765,15 @@ const deepDiveByCategory: Partial<Record<AlgorithmCategory, DeepDiveContent>> = 
       ],
     },
     realWorld: [
-      "Image compression, latent semantic analysis, recommender systems, and PCA-like dimensionality reduction.",
-      "Noise reduction by removing low-energy components.",
-      "Understanding hidden structure in large matrices.",
+      "Image compression, background subtraction in video, recommender systems, search indexing, and PCA-like dimensionality reduction.",
+      "Noise reduction by keeping stable low-rank structure and discarding high-frequency residuals.",
+      "Topic or parts discovery when nonnegative matrices are decomposed with NMF.",
     ],
     keyDetails: [
       "SVD is deterministic for a fixed matrix, unlike many iterative ML methods.",
       "Top singular values often explain most of the useful signal.",
-      "Randomized/truncated algorithms are common for huge data.",
+      "NMF is iterative and approximate, but its nonnegative factors are often easier to interpret.",
+      "Randomized/truncated algorithms are common for huge data because full decompositions are too expensive.",
     ],
   },
   "Convex Optimization": {

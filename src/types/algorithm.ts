@@ -508,10 +508,32 @@ export type SvdGeometryState = {
   currentVectors: SvdVector2D[];
 };
 
+export type MatrixDecompositionMethod = "svd" | "nmf";
+
+export type MatrixFactorBlock = {
+  label: string;
+  role: string;
+  matrix: MatrixParameterValue;
+  color: string;
+  signed?: boolean;
+};
+
+export type SvdUseCaseState = {
+  frame: MatrixParameterValue;
+  background: MatrixParameterValue;
+  foreground: MatrixParameterValue;
+  backgroundEnergy: number;
+  foregroundEnergy: number;
+};
+
 export type SvdState = {
   source: ImageMatrixParameterValue;
+  method: MatrixDecompositionMethod;
   original: MatrixParameterValue;
   approximation: MatrixParameterValue;
+  factors: MatrixFactorBlock[];
+  splitProgress: number;
+  useCase: SvdUseCaseState;
   rank: number;
   maxRank: number;
   singularValues: number[];

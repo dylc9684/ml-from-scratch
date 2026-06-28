@@ -3049,11 +3049,11 @@ function paintSvdLesson(
   context.fillStyle = "#17212b";
   context.font = "900 13px Inter, system-ui, sans-serif";
   context.textAlign = "left";
-  context.fillText("Low-rank image compression", compressionPane.x, compressionPane.y - 24);
-  context.fillText("Vector space factorization", geometryPane.x, geometryPane.y - 24);
+  context.fillText("Matrix split animation", compressionPane.x, compressionPane.y - 24);
+  context.fillText("What it does: background lift", geometryPane.x, geometryPane.y - 24);
 
   paintSvdCompressionPane(context, svd, compressionPane);
-  paintSvdGeometryPane(context, svd, geometryPane);
+  paintSvdUseCasePane(context, svd, geometryPane);
 }
 
 function paintSvdCompressionPane(
@@ -3071,45 +3071,104 @@ function paintSvdCompressionPane(
   context.fillStyle = "#17212b";
   context.font = "900 12px Inter, system-ui, sans-serif";
   context.textAlign = "left";
-  context.fillText(`${svd.source.name}`, pane.x + 14, pane.y + 22);
+  context.fillText(`${svd.method === "nmf" ? "NMF additive parts" : "SVD U Sigma V^T"}: ${svd.source.name}`, pane.x + 14, pane.y + 22);
 
   context.fillStyle = "#61707f";
   context.font = "700 11px Inter, system-ui, sans-serif";
   context.fillText(
     fitCanvasText(
       context,
-      `rank ${svd.rank}/${svd.maxRank} · retained energy ${(svd.retainedEnergy * 100).toFixed(1)}% · error ${svd.reconstructionError.toFixed(3)}`,
+      `rank ${svd.rank}/${svd.maxRank} · structure retained ${(svd.retainedEnergy * 100).toFixed(1)}% · error ${svd.reconstructionError.toFixed(3)}`,
       pane.width - 28,
     ),
     pane.x + 14,
     pane.y + 42,
   );
 
-  const imageGap = 14;
-  const imageTop = pane.y + 64;
-  const imageHeight = Math.min(pane.height * 0.5, pane.width * 0.42, 230);
-  const imageWidth = (pane.width - 28 - imageGap) / 2;
-  const originalBox = {
-    x: pane.x + 14,
-    y: imageTop,
-    width: imageWidth,
-    height: imageHeight,
+  const compactSplit = pane.width < 560;
+  const splitTop = pane.y + 64;
+  const splitHeight = compactSplit
+    ? Math.min(280, Math.max(220, pane.height * 0.44))
+    : Math.min(210, Math.max(150, pane.height * 0.38));
+  const sourceSize = compactSplit
+    ? Math.min(118, pane.width * 0.34, splitHeight * 0.46)
+    : Math.min(splitHeight, Math.max(104, pane.width * 0.2));
+  const sourceBox = {
+    x: compactSplit ? pane.x + (pane.width - sourceSize) / 2 : pane.x + 14,
+    y: compactSplit ? splitTop : splitTop + (splitHeight - sourceSize) / 2,
+    width: sourceSize,
+    height: sourceSize,
   };
-  const approxBox = {
-    x: originalBox.x + imageWidth + imageGap,
-    y: imageTop,
-    width: imageWidth,
-    height: imageHeight,
-  };
+  const factorAreaX = compactSplit ? pane.x + 14 : sourceBox.x + sourceBox.width + 48;
+  const factorAreaWidth = compactSplit
+    ? pane.width - 28
+    : Math.max(120, pane.x + pane.width - 14 - factorAreaX);
+  const factorGap = 10;
+  const factorWidth = Math.max(54, (factorAreaWidth - factorGap * 2 - 52) / 3);
+  const factorHeight = compactSplit
+    ? Math.max(76, splitTop + splitHeight - sourceBox.y - sourceSize - 34)
+    : Math.min(splitHeight, sourceSize);
+  const factorY = compactSplit ? sourceBox.y + sourceSize + 30 : splitTop + (splitHeight - factorHeight) / 2;
+  const splitEase = 0.5 - Math.cos(Math.max(0, Math.min(1, svd.splitProgress)) * Math.PI) / 2;
 
-  paintSvdImageBox(context, "original A", svd.original, originalBox);
-  paintSvdImageBox(context, `truncated A_k`, svd.approximation, approxBox);
+  paintSvdImageBox(context, "dense matrix A", svd.original, sourceBox);
+
+  context.save();
+  context.strokeStyle = `rgba(47, 111, 190, ${0.24 + splitEase * 0.5})`;
+  context.lineWidth = 2;
+  context.setLineDash([5, 5]);
+  context.beginPath();
+  if (compactSplit) {
+    context.moveTo(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height + 8);
+    context.lineTo(sourceBox.x + sourceBox.width / 2, factorY - 10);
+  } else {
+    context.moveTo(sourceBox.x + sourceBox.width + 10, sourceBox.y + sourceBox.height / 2);
+    context.lineTo(factorAreaX - 14, sourceBox.y + sourceBox.height / 2);
+  }
+  context.stroke();
+  context.setLineDash([]);
+  context.fillStyle = "#17212b";
+  context.font = "900 17px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(
+    "≈",
+    compactSplit ? sourceBox.x + sourceBox.width / 2 + 18 : sourceBox.x + sourceBox.width + 30,
+    compactSplit ? factorY - 12 : sourceBox.y + sourceBox.height / 2 + 6,
+  );
+  context.restore();
+
+  svd.factors.forEach((factor, index) => {
+    const target = {
+      x: factorAreaX + index * (factorWidth + factorGap + 18),
+      y: factorY,
+      width: factorWidth,
+      height: factorHeight,
+    };
+    const collapsed = {
+      x: sourceBox.x + sourceBox.width * 0.38,
+      y: sourceBox.y + sourceBox.height * 0.18,
+      width: sourceBox.width * 0.52,
+      height: sourceBox.height * 0.64,
+    };
+    const box = interpolateCanvasPane(collapsed, target, splitEase);
+    context.save();
+    context.globalAlpha = 0.2 + splitEase * 0.8;
+    paintSvdFactorBlock(context, factor, box);
+    context.restore();
+
+    if (index < svd.factors.length - 1) {
+      context.fillStyle = "#61707f";
+      context.font = "900 13px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText("x", target.x + target.width + factorGap / 2 + 9, target.y + target.height / 2 + 5);
+    }
+  });
 
   const spectrumPane = {
     x: pane.x + 14,
-    y: imageTop + imageHeight + 42,
+    y: splitTop + splitHeight + 28,
     width: pane.width - 28,
-    height: Math.max(110, pane.y + pane.height - imageTop - imageHeight - 62),
+    height: Math.max(118, pane.y + pane.height - splitTop - splitHeight - 48),
   };
   paintSvdSpectrum(context, svd, spectrumPane);
 
@@ -3163,7 +3222,7 @@ function paintSvdSpectrum(
   context.fillStyle = "#17212b";
   context.font = "900 11px Inter, system-ui, sans-serif";
   context.textAlign = "left";
-  context.fillText("singular value spectrum", pane.x + 12, pane.y + 18);
+  context.fillText(svd.method === "nmf" ? "component strength spectrum" : "singular value spectrum", pane.x + 12, pane.y + 18);
 
   const values = svd.singularValues.slice(0, Math.min(18, svd.singularValues.length));
   const maxValue = Math.max(1e-8, ...values);
@@ -3187,10 +3246,89 @@ function paintSvdSpectrum(
   context.fillStyle = "#61707f";
   context.font = "700 10px Inter, system-ui, sans-serif";
   context.textAlign = "right";
-  context.fillText(`sigma1=${(svd.singularValues[0] ?? 0).toFixed(2)}`, pane.x + pane.width - 12, pane.y + 18);
+  context.fillText(
+    `${svd.method === "nmf" ? "c1" : "sigma1"}=${(svd.singularValues[0] ?? 0).toFixed(2)}`,
+    pane.x + pane.width - 12,
+    pane.y + 18,
+  );
 }
 
-function paintSvdGeometryPane(
+function paintSvdFactorBlock(
+  context: CanvasRenderingContext2D,
+  factor: NonNullable<ConceptFrame["svd"]>["factors"][number],
+  box: CanvasPane,
+) {
+  context.fillStyle = "#f7fafc";
+  context.strokeStyle = factor.color;
+  context.lineWidth = 1.5;
+  context.fillRect(box.x, box.y, box.width, box.height);
+  context.strokeRect(box.x, box.y, box.width, box.height);
+
+  paintSvdMatrixCells(context, factor.matrix, {
+    x: box.x + 8,
+    y: box.y + 26,
+    width: box.width - 16,
+    height: Math.max(34, box.height - 56),
+  }, factor.color, Boolean(factor.signed));
+
+  context.fillStyle = "#17212b";
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(factor.label, box.x + box.width / 2, box.y + 16);
+
+  context.fillStyle = "#61707f";
+  context.font = "800 8px Inter, system-ui, sans-serif";
+  context.fillText(fitCanvasText(context, factor.role, box.width - 10), box.x + box.width / 2, box.y + box.height - 22);
+  context.fillText(`${factor.matrix.length}x${factor.matrix[0]?.length ?? 0}`, box.x + box.width / 2, box.y + box.height - 9);
+}
+
+function paintSvdMatrixCells(
+  context: CanvasRenderingContext2D,
+  matrix: number[][],
+  box: CanvasPane,
+  accent: string,
+  signed: boolean,
+) {
+  const rows = matrix.length;
+  const columns = matrix[0]?.length ?? 0;
+  const maxAbs = Math.max(1e-8, ...matrix.flat().map((value) => Math.abs(value)));
+  const cellWidth = box.width / Math.max(1, columns);
+  const cellHeight = box.height / Math.max(1, rows);
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const value = matrix[row][column] ?? 0;
+      const normalized = Math.min(1, Math.abs(value) / maxAbs);
+      if (signed) {
+        const positive = value >= 0;
+        context.fillStyle = positive
+          ? `rgba(47, 111, 190, ${0.12 + normalized * 0.82})`
+          : `rgba(211, 74, 67, ${0.12 + normalized * 0.82})`;
+      } else {
+        context.fillStyle = `${accent}${Math.round((0.16 + normalized * 0.74) * 255)
+          .toString(16)
+          .padStart(2, "0")}`;
+      }
+      context.fillRect(
+        box.x + column * cellWidth,
+        box.y + row * cellHeight,
+        Math.ceil(cellWidth),
+        Math.ceil(cellHeight),
+      );
+    }
+  }
+}
+
+function interpolateCanvasPane(from: CanvasPane, to: CanvasPane, progress: number): CanvasPane {
+  return {
+    x: from.x + (to.x - from.x) * progress,
+    y: from.y + (to.y - from.y) * progress,
+    width: from.width + (to.width - from.width) * progress,
+    height: from.height + (to.height - from.height) * progress,
+  };
+}
+
+function paintSvdUseCasePane(
   context: CanvasRenderingContext2D,
   svd: NonNullable<ConceptFrame["svd"]>,
   pane: CanvasPane,
@@ -3205,116 +3343,81 @@ function paintSvdGeometryPane(
   context.fillStyle = "#17212b";
   context.font = "900 12px Inter, system-ui, sans-serif";
   context.textAlign = "left";
-  context.fillText(`${svd.geometry.phase}`, pane.x + 14, pane.y + 22);
+  context.fillText("Low-rank background extraction", pane.x + 14, pane.y + 22);
   context.fillStyle = "#61707f";
   context.font = "700 11px Inter, system-ui, sans-serif";
   context.fillText(
     fitCanvasText(
       context,
-      `V^T rotates · Sigma scales (${svd.geometry.scaleX.toFixed(2)}, ${svd.geometry.scaleY.toFixed(2)}) · U rotates`,
+      "The low-rank reconstruction models stable background; the residual exposes detail or motion.",
       pane.width - 28,
     ),
     pane.x + 14,
     pane.y + 42,
   );
 
-  const plot = {
-    x: pane.x + 28,
-    y: pane.y + 68,
-    width: pane.width - 56,
-    height: Math.max(170, pane.height - 148),
+  const mainBox = {
+    x: pane.x + 14,
+    y: pane.y + 66,
+    width: pane.width - 28,
+    height: Math.min(Math.max(145, pane.width * 0.62), pane.height * 0.34),
   };
-  const center = { x: plot.x + plot.width / 2, y: plot.y + plot.height / 2 };
-  const scale = Math.min(plot.width, plot.height) / 4.2;
+  paintSvdImageBox(context, "uploaded frame", svd.useCase.frame, mainBox);
 
-  context.fillStyle = "rgba(247, 250, 252, 0.88)";
-  context.fillRect(plot.x, plot.y, plot.width, plot.height);
-  context.strokeStyle = "#dce5ea";
-  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
-
-  context.strokeStyle = "#c9d4da";
-  context.lineWidth = 1;
-  context.beginPath();
-  context.moveTo(plot.x + 12, center.y);
-  context.lineTo(plot.x + plot.width - 12, center.y);
-  context.moveTo(center.x, plot.y + 12);
-  context.lineTo(center.x, plot.y + plot.height - 12);
-  context.stroke();
-
-  context.setLineDash([4, 5]);
-  context.strokeStyle = "rgba(97, 112, 127, 0.34)";
-  context.beginPath();
-  context.arc(center.x, center.y, scale, 0, Math.PI * 2);
-  context.stroke();
-  context.setLineDash([]);
-
-  svd.geometry.inputVectors.forEach((vector) => {
-    paintSvdArrow(context, center, scale, vector, "rgba(97, 112, 127, 0.28)", true);
+  const bottomTop = mainBox.y + mainBox.height + 34;
+  const bottomHeight = Math.max(112, pane.y + pane.height - bottomTop - 78);
+  const bottomGap = 12;
+  const bottomWidth = (pane.width - 28 - bottomGap) / 2;
+  paintSvdImageBox(context, "low-rank background", svd.useCase.background, {
+    x: pane.x + 14,
+    y: bottomTop,
+    width: bottomWidth,
+    height: bottomHeight,
   });
-  svd.geometry.currentVectors.forEach((vector) => {
-    paintSvdArrow(context, center, scale, vector, vector.color, false);
+  paintSvdImageBox(context, "foreground residual", svd.useCase.foreground, {
+    x: pane.x + 14 + bottomWidth + bottomGap,
+    y: bottomTop,
+    width: bottomWidth,
+    height: bottomHeight,
   });
 
-  const chips = ["V^T rotation", "Sigma scaling", "U rotation"];
-  const chipWidth = (pane.width - 28 - 12) / 3;
-  const chipY = pane.y + pane.height - 52;
-  chips.forEach((chip, index) => {
-    const x = pane.x + 14 + index * (chipWidth + 6);
-    const active = chip === svd.geometry.phase;
-    context.fillStyle = active ? "#e7f6f2" : "#f7fafc";
-    context.strokeStyle = active ? "#0f766e" : "#dce5ea";
-    context.fillRect(x, chipY, chipWidth, 30);
-    context.strokeRect(x, chipY, chipWidth, 30);
-    context.fillStyle = active ? "#0b5f59" : "#61707f";
-    context.font = "900 9px Inter, system-ui, sans-serif";
-    context.textAlign = "center";
-    context.fillText(fitCanvasText(context, chip, chipWidth - 8), x + chipWidth / 2, chipY + 19);
-  });
+  const meterY = pane.y + pane.height - 54;
+  paintSvdMeter(
+    context,
+    "background modeled",
+    svd.useCase.backgroundEnergy,
+    { x: pane.x + 14, y: meterY, width: pane.width - 28, height: 18 },
+    "#2f6fbe",
+  );
+  paintSvdMeter(
+    context,
+    "foreground residual",
+    svd.useCase.foregroundEnergy,
+    { x: pane.x + 14, y: meterY + 25, width: pane.width - 28, height: 18 },
+    "#d34a43",
+  );
 
   context.restore();
 }
 
-function paintSvdArrow(
+function paintSvdMeter(
   context: CanvasRenderingContext2D,
-  center: { x: number; y: number },
-  scale: number,
-  vector: { x: number; y: number; color: string; label: string },
+  label: string,
+  value: number,
+  box: CanvasPane,
   color: string,
-  ghost: boolean,
 ) {
-  const end = {
-    x: center.x + vector.x * scale,
-    y: center.y - vector.y * scale,
-  };
-  const angle = Math.atan2(end.y - center.y, end.x - center.x);
-
-  context.save();
-  context.strokeStyle = color;
+  const normalized = Math.max(0, Math.min(1, value));
+  context.fillStyle = "#f7fafc";
+  context.strokeStyle = "#dce5ea";
+  context.fillRect(box.x, box.y, box.width, box.height);
+  context.strokeRect(box.x, box.y, box.width, box.height);
   context.fillStyle = color;
-  context.lineWidth = ghost ? 1.3 : 2.8;
-  context.globalAlpha = ghost ? 0.7 : 0.94;
-  if (ghost) {
-    context.setLineDash([5, 4]);
-  }
-  context.beginPath();
-  context.moveTo(center.x, center.y);
-  context.lineTo(end.x, end.y);
-  context.stroke();
-  context.setLineDash([]);
-  context.translate(end.x, end.y);
-  context.rotate(angle);
-  context.beginPath();
-  context.moveTo(8, 0);
-  context.lineTo(-5, -5);
-  context.lineTo(-5, 5);
-  context.closePath();
-  context.fill();
-  context.rotate(-angle);
-  context.fillStyle = ghost ? "#61707f" : vector.color;
-  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.fillRect(box.x, box.y, box.width * normalized, box.height);
+  context.fillStyle = "#17212b";
+  context.font = "900 9px Inter, system-ui, sans-serif";
   context.textAlign = "left";
-  context.fillText(vector.label, 8, -8);
-  context.restore();
+  context.fillText(`${label}: ${Math.round(normalized * 100)}%`, box.x + 7, box.y + 13);
 }
 
 function paintStochasticLesson(

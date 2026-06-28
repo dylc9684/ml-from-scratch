@@ -22,6 +22,7 @@ import type {
   LossFunctionKey,
   LossSurfaceKey,
   LossPrediction,
+  MatrixDecompositionMethod,
   NormalizedDataset,
   OptimizerKey,
   ParameterState,
@@ -2274,8 +2275,18 @@ const singularValueDecomposition = makeConceptAlgorithm({
   id: "singular-value-decomposition",
   name: "Singular Value Decomposition",
   category: "Singular Value Decomposition",
-  summary: "Compresses grayscale images with low-rank SVD and animates U Sigma V^T geometry.",
+  summary: "Splits dense matrices into factors, then uses low-rank structure for image compression and background lift.",
   parameters: [
+    {
+      kind: "select",
+      id: "decompositionMethod",
+      label: "Decomposition method",
+      defaultValue: "svd",
+      options: [
+        { label: "SVD: rotations + scaling", value: "svd" },
+        { label: "NMF: additive parts", value: "nmf" },
+      ],
+    },
     {
       kind: "image",
       id: "imageMatrix",
@@ -2287,7 +2298,7 @@ const singularValueDecomposition = makeConceptAlgorithm({
     {
       kind: "range",
       id: "rank",
-      label: "Rank k",
+      label: "Rank / factors k",
       min: 1,
       max: 40,
       step: 1,
@@ -2299,18 +2310,28 @@ const singularValueDecomposition = makeConceptAlgorithm({
   formulas: [
     { title: "SVD factorization", expression: "A=U\\Sigma V^T" },
     { title: "Low-rank approximation", expression: "A_k=U_k\\Sigma_kV_k^T=\\sum_{i=1}^{k}\\sigma_i u_iv_i^T" },
+    { title: "NMF factorization", expression: "A\\approx WH,\\quad W,H\\ge 0" },
     { title: "Energy retained", expression: "\\frac{\\sum_{i=1}^{k}\\sigma_i^2}{\\sum_i\\sigma_i^2}" },
   ],
   explanation: [
-    "SVD decomposes a matrix into two rotations/reflections and one diagonal scaling stage.",
-    "For images, the largest singular values capture broad structure first; keeping more rank-one components restores edges and texture.",
-    "The geometric view shows the same factorization as transformations: V^T rotates into principal directions, Sigma stretches by variance, and U rotates into the output basis.",
+    "A decomposition turns one large table of numbers into smaller factor matrices whose product reconstructs the original signal.",
+    "For images, low-rank factors capture broad background structure first; the residual highlights edges, texture, and foreground motion.",
+    "SVD gives the clean U Sigma V^T linear algebra view, while NMF gives an additive, parts-based view that is easier to interpret when all values are nonnegative.",
   ],
   engine: (_, params) => {
     const source = imageMatrixParam(params, "imageMatrix", defaultSvdImage);
     const maxRank = Math.max(1, Math.min(source.height, source.width));
     const rank = Math.max(1, Math.min(maxRank, Math.round(numberParam(params, "rank", 8))));
-    const decomposition = lowRankSvdApproximation(source.values, rank);
+    const method = matrixDecompositionMethodParam(params, "decompositionMethod", "svd");
+    const decomposition =
+      method === "nmf"
+        ? nonnegativeMatrixFactorization(source.values, rank)
+        : lowRankSvdApproximation(source.values, rank);
+    const useCase = makeMatrixDecompositionUseCase(
+      source.values,
+      decomposition.approximation,
+      decomposition.retainedEnergy,
+    );
     const frameCount = 36;
     const frames = Array.from({ length: frameCount }, (_, index) => {
       const progress = index / Math.max(1, frameCount - 1);
@@ -2325,8 +2346,12 @@ const singularValueDecomposition = makeConceptAlgorithm({
         })),
         svd: {
           source,
+          method,
           original: source.values,
           approximation: decomposition.approximation,
+          factors: decomposition.factors,
+          splitProgress: progress,
+          useCase,
           rank,
           maxRank,
           singularValues: decomposition.singularValues,
@@ -2334,7 +2359,7 @@ const singularValueDecomposition = makeConceptAlgorithm({
           reconstructionError: decomposition.reconstructionError,
           geometry: makeSvdGeometry(progress),
         },
-        summary: `rank ${rank}/${maxRank} · energy ${(decomposition.retainedEnergy * 100).toFixed(1)}% · error ${decomposition.reconstructionError.toFixed(3)}`,
+        summary: `${matrixDecompositionMethodLabel(method)} · rank ${rank}/${maxRank} · retained ${(decomposition.retainedEnergy * 100).toFixed(1)}% · residual ${(useCase.foregroundEnergy * 100).toFixed(1)}%`,
       };
     });
 
@@ -2342,15 +2367,36 @@ const singularValueDecomposition = makeConceptAlgorithm({
       frames,
       runtime: "JavaScript",
       metrics: [
+        { label: "Method", value: matrixDecompositionMethodLabel(method) },
         { label: "Rank", value: `${rank}/${maxRank}` },
-        { label: "Energy retained", value: `${Math.round(decomposition.retainedEnergy * 100)}%` },
+        { label: "Structure retained", value: `${Math.round(decomposition.retainedEnergy * 100)}%` },
         { label: "Reconstruction error", value: decomposition.reconstructionError.toFixed(3) },
-        { label: "Image matrix", value: `${source.height}x${source.width}` },
+        { label: "Foreground residual", value: `${Math.round(useCase.foregroundEnergy * 100)}%` },
       ],
     };
   },
   python: (params) => {
     const rank = Math.round(numberParam(params, "rank", 8));
+    const method = matrixDecompositionMethodParam(params, "decompositionMethod", "svd");
+
+    if (method === "nmf") {
+      return `import numpy as np
+
+# A is a nonnegative grayscale image matrix with values in [0, 1].
+k = ${rank}
+eps = 1e-9
+rng = np.random.default_rng(7)
+W = rng.random((A.shape[0], k)) + 0.1
+H = rng.random((k, A.shape[1])) + 0.1
+
+for _ in range(60):
+    H *= (W.T @ A) / (W.T @ W @ H + eps)
+    W *= (A @ H.T) / (W @ H @ H.T + eps)
+
+A_k = W @ H
+background = A_k
+foreground = np.abs(A - background)`;
+    }
 
     return `import numpy as np
 
@@ -2367,10 +2413,33 @@ Sigma = np.diag(singular_values[:k])
 U = A @ V[:, :k] / (singular_values[:k] + 1e-12)
 
 A_k = U @ Sigma @ V[:, :k].T
+background = A_k
+foreground = np.abs(A - background)
 energy = np.sum(singular_values[:k] ** 2) / np.sum(singular_values ** 2)`;
   },
   javascript: (params) => {
     const rank = Math.round(numberParam(params, "rank", 8));
+    const method = matrixDecompositionMethodParam(params, "decompositionMethod", "svd");
+
+    if (method === "nmf") {
+      return `const k = ${rank};
+const eps = 1e-9;
+let W = seededMatrix(A.length, k, 7);
+let H = seededMatrix(k, A[0].length, 11);
+
+for (let step = 0; step < 60; step += 1) {
+  H = multiplyElementwise(H,
+    divideMatrices(matMul(transpose(W), A), addScalar(matMul(matMul(transpose(W), W), H), eps)));
+  W = multiplyElementwise(W,
+    divideMatrices(matMul(A, transpose(H)), addScalar(matMul(matMul(W, H), transpose(H)), eps)));
+}
+
+const Ak = matMul(W, H);
+const background = Ak;
+const foreground = A.map((row, i) =>
+  row.map((value, j) => Math.abs(value - background[i][j]))
+);`;
+    }
 
     return `const k = ${rank};
 const gram = matMul(transpose(A), A);
@@ -2392,6 +2461,11 @@ for (let component = 0; component < Vk.length; component += 1) {
     }
   }
 }
+
+const background = Ak;
+const foreground = A.map((row, i) =>
+  row.map((value, j) => Math.abs(value - background[i][j]))
+);
 
 // TensorFlow.js equivalent pieces:
 // const gram = tf.matMul(A, A, true, false);
@@ -2436,6 +2510,19 @@ function makeSvdDataset() {
   );
 }
 
+function matrixDecompositionMethodParam(
+  params: ParameterState,
+  key: string,
+  fallback: MatrixDecompositionMethod,
+): MatrixDecompositionMethod {
+  const value = stringParam(params, key, fallback);
+  return value === "nmf" ? "nmf" : "svd";
+}
+
+function matrixDecompositionMethodLabel(method: MatrixDecompositionMethod) {
+  return method === "nmf" ? "NMF" : "SVD";
+}
+
 function lowRankSvdApproximation(matrix: number[][], rank: number) {
   const height = matrix.length;
   const width = matrix[0]?.length ?? 0;
@@ -2450,18 +2537,28 @@ function lowRankSvdApproximation(matrix: number[][], rank: number) {
   const singularValues = components.map((component) => Math.sqrt(component.value));
   const approximation = zeroMatrix(height, width);
   const usableRank = Math.min(rank, components.length);
+  const uMatrix = zeroMatrix(height, usableRank);
+  const sigmaMatrix = zeroMatrix(usableRank, usableRank);
+  const vTranspose = zeroMatrix(usableRank, width);
 
   for (let componentIndex = 0; componentIndex < usableRank; componentIndex += 1) {
     const component = components[componentIndex];
     const sigma = Math.sqrt(component.value);
+    const av = multiplyMatrixVector(matrix, component.vector);
+    component.vector.forEach((value, column) => {
+      vTranspose[componentIndex][column] = value;
+    });
+    sigmaMatrix[componentIndex][componentIndex] = sigma;
+
     if (sigma < 1e-10) {
       continue;
     }
 
-    const av = multiplyMatrixVector(matrix, component.vector);
     for (let row = 0; row < height; row += 1) {
+      const uValue = av[row] / sigma;
+      uMatrix[row][componentIndex] = uValue;
       for (let column = 0; column < width; column += 1) {
-        approximation[row][column] += av[row] * component.vector[column];
+        approximation[row][column] += sigma * uValue * component.vector[column];
       }
     }
   }
@@ -2474,16 +2571,171 @@ function lowRankSvdApproximation(matrix: number[][], rank: number) {
   for (let row = 0; row < height; row += 1) {
     for (let column = 0; column < width; column += 1) {
       squaredError += (matrix[row][column] - approximation[row][column]) ** 2;
-      approximation[row][column] = clamp(approximation[row][column]);
+      approximation[row][column] = clampPixel(approximation[row][column]);
     }
   }
 
   return {
     approximation,
+    factors: [
+      { label: "U_k", role: "left basis", matrix: uMatrix, color: "#2f6fbe", signed: true },
+      { label: "Sigma_k", role: "strengths", matrix: sigmaMatrix, color: "#b7791f", signed: false },
+      { label: "V_k^T", role: "right basis", matrix: vTranspose, color: "#0f766e", signed: true },
+    ],
     singularValues,
     retainedEnergy,
     reconstructionError: Math.sqrt(squaredError / originalEnergy),
   };
+}
+
+function nonnegativeMatrixFactorization(matrix: number[][], rank: number) {
+  const target = matrix.map((row) => row.map(clampPixel));
+  const height = target.length;
+  const width = target[0]?.length ?? 0;
+  const usableRank = Math.max(1, Math.min(rank, height, width));
+  let w = Array.from({ length: height }, (_, row) =>
+    Array.from({ length: usableRank }, (_, column) =>
+      0.16 + 0.09 * ((row + 1) / Math.max(1, height)) + 0.05 * ((column + 1) / Math.max(1, usableRank)),
+    ),
+  );
+  let h = Array.from({ length: usableRank }, (_, row) =>
+    Array.from({ length: width }, (_, column) =>
+      0.14 + 0.08 * ((column + 1) / Math.max(1, width)) + 0.04 * ((row + 1) / Math.max(1, usableRank)),
+    ),
+  );
+  const epsilon = 1e-8;
+
+  for (let iteration = 0; iteration < 48; iteration += 1) {
+    const wh = multiplyMatrices(w, h);
+    const numeratorH = multiplyMatrices(transposeMatrix(w), target);
+    const denominatorH = multiplyMatrices(transposeMatrix(w), wh);
+    h = h.map((row, rowIndex) =>
+      row.map((value, columnIndex) =>
+        Math.max(1e-6, value * (numeratorH[rowIndex][columnIndex] / (denominatorH[rowIndex][columnIndex] + epsilon))),
+      ),
+    );
+
+    const refreshedWh = multiplyMatrices(w, h);
+    const numeratorW = multiplyMatrices(target, transposeMatrix(h));
+    const denominatorW = multiplyMatrices(refreshedWh, transposeMatrix(h));
+    w = w.map((row, rowIndex) =>
+      row.map((value, columnIndex) =>
+        Math.max(1e-6, value * (numeratorW[rowIndex][columnIndex] / (denominatorW[rowIndex][columnIndex] + epsilon))),
+      ),
+    );
+  }
+
+  const { basis, weights, features, strengths } = normalizeNmfFactors(w, h);
+  const approximation = multiplyMatrices(multiplyMatrices(basis, weights), features).map((row) =>
+    row.map(clampPixel),
+  );
+  const originalEnergy = Math.max(1e-12, target.flat().reduce((sum, value) => sum + value ** 2, 0));
+  let squaredError = 0;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      squaredError += (target[row][column] - approximation[row][column]) ** 2;
+    }
+  }
+  const reconstructionError = Math.sqrt(squaredError / originalEnergy);
+
+  return {
+    approximation,
+    factors: [
+      { label: "W_k", role: "parts basis", matrix: basis, color: "#2f6fbe", signed: false },
+      { label: "D_k", role: "part weights", matrix: weights, color: "#b7791f", signed: false },
+      { label: "H_k", role: "activations", matrix: features, color: "#0f766e", signed: false },
+    ],
+    singularValues: strengths,
+    retainedEnergy: Math.max(0, Math.min(1, 1 - reconstructionError)),
+    reconstructionError,
+  };
+}
+
+function normalizeNmfFactors(w: number[][], h: number[][]) {
+  const height = w.length;
+  const rank = w[0]?.length ?? 0;
+  const width = h[0]?.length ?? 0;
+  const basis = zeroMatrix(height, rank);
+  const weights = zeroMatrix(rank, rank);
+  const features = zeroMatrix(rank, width);
+  const strengths: number[] = [];
+
+  for (let component = 0; component < rank; component += 1) {
+    const columnNorm = Math.sqrt(w.reduce((sum, row) => sum + row[component] ** 2, 0)) || 1;
+    const rowNorm = Math.sqrt(h[component].reduce((sum, value) => sum + value ** 2, 0)) || 1;
+    weights[component][component] = columnNorm * rowNorm;
+    strengths.push(weights[component][component]);
+
+    for (let row = 0; row < height; row += 1) {
+      basis[row][component] = w[row][component] / columnNorm;
+    }
+    for (let column = 0; column < width; column += 1) {
+      features[component][column] = h[component][column] / rowNorm;
+    }
+  }
+
+  return {
+    basis,
+    weights,
+    features,
+    strengths,
+  };
+}
+
+function makeMatrixDecompositionUseCase(
+  frame: number[][],
+  background: number[][],
+  backgroundEnergy: number,
+) {
+  const foregroundRaw = frame.map((row, rowIndex) =>
+    row.map((value, columnIndex) => Math.abs(value - (background[rowIndex]?.[columnIndex] ?? 0))),
+  );
+  const maxForeground = Math.max(1e-8, ...foregroundRaw.flat());
+  const foreground = foregroundRaw.map((row) =>
+    row.map((value) => clampPixel((value / maxForeground) * 0.9)),
+  );
+  const foregroundEnergy =
+    foreground.reduce((total, row) => total + row.reduce((rowTotal, value) => rowTotal + value, 0), 0) /
+    Math.max(1, foreground.length * (foreground[0]?.length ?? 1));
+
+  return {
+    frame,
+    background,
+    foreground,
+    backgroundEnergy,
+    foregroundEnergy,
+  };
+}
+
+function transposeMatrix(matrix: number[][]) {
+  const height = matrix.length;
+  const width = matrix[0]?.length ?? 0;
+  return Array.from({ length: width }, (_, column) =>
+    Array.from({ length: height }, (_, row) => matrix[row][column] ?? 0),
+  );
+}
+
+function multiplyMatrices(left: number[][], right: number[][]) {
+  const rows = left.length;
+  const shared = left[0]?.length ?? 0;
+  const columns = right[0]?.length ?? 0;
+  const result = zeroMatrix(rows, columns);
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      let sum = 0;
+      for (let index = 0; index < shared; index += 1) {
+        sum += (left[row][index] ?? 0) * (right[index]?.[column] ?? 0);
+      }
+      result[row][column] = sum;
+    }
+  }
+
+  return result;
+}
+
+function clampPixel(value: number) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function multiplyTransposeByMatrix(matrix: number[][]) {
