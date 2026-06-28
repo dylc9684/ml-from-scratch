@@ -122,6 +122,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Anomaly Detection": "Outlier scoring and unusual-pattern discovery.",
   "Handling Imbalanced Data": "Sampling, class weights, and threshold tradeoffs.",
   "Time Series Fundamentals": "Trend, seasonality, lag features, and forecasting.",
+  "Building a Tokenizer": "Subword units, byte fallback, BPE merges, and token IDs.",
   "Stochastic Processes": "Random walks, noise, transition matrices, and Markov chains.",
   "Dynamic Programming": "Bellman updates, Gridworld values, and optimal policies.",
   "Singular Value Decomposition": "Low-rank image compression and geometric matrix factors.",

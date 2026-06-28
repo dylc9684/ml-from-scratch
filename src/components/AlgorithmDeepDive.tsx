@@ -259,6 +259,37 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Pick k with validation, domain knowledge, or an elbow/silhouette analysis.",
     ],
   },
+  "building-tokenizer": {
+    graphTitle: "What the tokenizer graph is showing",
+    graphNotes: [
+      "Each colored chip is one token that will become one integer ID before text reaches a model.",
+      "A larger vocabulary allows more frequent character pairs to merge into longer subwords.",
+      "Red byte fallback chips show characters that were not merged into familiar text pieces.",
+    ],
+    complexity: {
+      time: "Training toy BPE is roughly O(m L) here, where m is merges and L is corpus length.",
+      prediction: "O(m L) for a simple educational merge loop over one input.",
+      space: "O(V + L) for merge rules, token IDs, and the current symbol sequence.",
+      plainEnglish:
+        "Production tokenizers use optimized tables, but the core idea is still repeated pair lookup and replacement.",
+      terms: [
+        { label: "input length L", weight: 76 },
+        { label: "merge rules m", weight: 68 },
+        { label: "vocab V", weight: 54 },
+        { label: "bytes", weight: 62 },
+      ],
+    },
+    realWorld: [
+      "Counting context-window cost before sending prompts to a language model.",
+      "Understanding why emoji, rare scripts, or mixed-language text can consume more tokens.",
+      "Building client-side prompt previews, truncators, and text preprocessing tools.",
+    ],
+    keyDetails: [
+      "Token IDs are not words; they are learned chunks that may be words, word pieces, spaces, or bytes.",
+      "Small vocabularies reduce the lookup table but increase token overhead.",
+      "Byte fallback makes every string encodable, but poorly represented text becomes more expensive.",
+    ],
+  },
 };
 
 const deepDiveByCategory: Partial<Record<AlgorithmCategory, DeepDiveContent>> = {

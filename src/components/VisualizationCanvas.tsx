@@ -55,6 +55,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
   const isDynamicProgrammingLesson = frame?.type === "concept-demo" && Boolean(frame.dynamicProgramming);
+  const isTokenizerLesson = frame?.type === "concept-demo" && Boolean(frame.tokenizer);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -129,6 +130,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
         isConvolutionLesson ? "convolution-shell" : ""
       } ${
         isDynamicProgrammingLesson ? "dynamic-programming-shell" : ""
+      } ${
+        isTokenizerLesson ? "tokenizer-shell" : ""
       }`}
       aria-label={`${algorithm.name} visualization`}
     >
@@ -213,6 +216,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.dynamicProgramming) {
     paintDynamicProgrammingLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.tokenizer) {
+    paintTokenizerLesson(context, frame, size);
     return;
   }
 
@@ -1930,6 +1938,259 @@ function paintGridWorldCell(grid: GridWorldValue, row: number, column: number, t
     ...grid,
     cells,
   };
+}
+
+const tokenizerChipColors = ["#d9f2ee", "#e4ecff", "#fff0d8", "#f8dedc", "#eee9ff", "#dcf5e8"];
+
+function paintTokenizerLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const tokenizer = frame.tokenizer;
+  if (!tokenizer) {
+    return;
+  }
+
+  const narrow = size.width < 760;
+  const padding = 24;
+  const gap = 18;
+  const leftPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(250, size.height * 0.46) }
+    : { x: padding, y: 58, width: Math.max(420, size.width * 0.58), height: size.height - 96 };
+  const rightPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: leftPane.y + leftPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(250, size.height - leftPane.height - 120),
+      }
+    : {
+        x: leftPane.x + leftPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - leftPane.width - gap,
+        height: size.height - 96,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Subword colorizer sandbox", leftPane.x, leftPane.y - 24);
+  context.fillText("Token IDs and merge pressure", rightPane.x, rightPane.y - 24);
+
+  paintTokenizerPieces(context, tokenizer, leftPane);
+  paintTokenizerDetails(context, tokenizer, rightPane);
+}
+
+function paintTokenizerPieces(
+  context: CanvasRenderingContext2D,
+  tokenizer: NonNullable<ConceptFrame["tokenizer"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Live BPE segmentation", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${tokenizer.characterLength} characters · ${tokenizer.byteLength} UTF-8 bytes · ${tokenizer.mergeCount} trained merges active`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  let x = pane.x + 16;
+  let y = pane.y + 72;
+  const maxX = pane.x + pane.width - 16;
+  const maxY = pane.y + pane.height - 66;
+  const chipHeight = 34;
+  const rowGap = 10;
+
+  tokenizer.pieces.forEach((piece, index) => {
+    const label = tokenizerPieceLabel(piece.text);
+    context.font = piece.byteFallback
+      ? "900 11px ui-monospace, SFMono-Regular, Menlo, monospace"
+      : "900 13px Inter, system-ui, sans-serif";
+    const chipWidth = Math.min(maxX - (pane.x + 16), Math.max(42, context.measureText(label).width + 22));
+
+    if (x + chipWidth > maxX) {
+      x = pane.x + 16;
+      y += chipHeight + rowGap;
+    }
+
+    if (y + chipHeight > maxY) {
+      if (index < tokenizer.pieces.length) {
+        context.fillStyle = "#61707f";
+        context.font = "800 11px Inter, system-ui, sans-serif";
+        context.fillText(`+${tokenizer.pieces.length - index} more token(s)`, x, y + 18);
+      }
+      return;
+    }
+
+    const color = piece.byteFallback ? "#fff7f6" : tokenizerChipColors[piece.colorIndex % tokenizerChipColors.length];
+    paintRoundedRect(context, x, y, chipWidth, chipHeight, 8, color, piece.byteFallback ? "#d34a43" : "#d8e0e5");
+    context.fillStyle = piece.byteFallback ? "#9f2d28" : "#17212b";
+    context.textAlign = "center";
+    context.fillText(fitCanvasText(context, label, chipWidth - 14), x + chipWidth / 2, y + 21);
+
+    x += chipWidth + 8;
+  });
+
+  const baselineY = pane.y + pane.height - 48;
+  paintTokenizerStatStrip(context, tokenizer, {
+    x: pane.x + 14,
+    y: baselineY,
+    width: pane.width - 28,
+    height: 32,
+  });
+
+  context.restore();
+}
+
+function paintTokenizerStatStrip(
+  context: CanvasRenderingContext2D,
+  tokenizer: NonNullable<ConceptFrame["tokenizer"]>,
+  pane: CanvasPane,
+) {
+  const stats = [
+    { label: "tokens", value: tokenizer.pieces.length.toString(), color: "#0f766e" },
+    { label: "byte fallback", value: tokenizer.byteFallbackCount.toString(), color: "#d34a43" },
+    { label: "overhead", value: `${tokenizer.compressionRatio.toFixed(2)}x`, color: "#2f6fbe" },
+  ];
+  const gap = 8;
+  const width = (pane.width - gap * (stats.length - 1)) / stats.length;
+
+  stats.forEach((stat, index) => {
+    const x = pane.x + index * (width + gap);
+    paintRoundedRect(context, x, pane.y, width, pane.height, 8, "#ffffff", "#d8e0e5");
+    context.fillStyle = stat.color;
+    context.font = "900 11px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(stat.value, x + width / 2, pane.y + 13);
+    context.fillStyle = "#61707f";
+    context.font = "800 8px Inter, system-ui, sans-serif";
+    context.fillText(stat.label, x + width / 2, pane.y + 25);
+  });
+}
+
+function paintTokenizerDetails(
+  context: CanvasRenderingContext2D,
+  tokenizer: NonNullable<ConceptFrame["tokenizer"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`Raw token ID array [${tokenizer.tokenIds.length}]`, pane.x + 14, pane.y + 22);
+
+  const idsText = `[${tokenizer.tokenIds.join(", ")}]`;
+  context.fillStyle = "#26323f";
+  context.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  wrapCanvasText(context, idsText, pane.x + 14, pane.y + 48, pane.width - 28, 16, 7);
+
+  const byteBoxY = pane.y + Math.min(170, pane.height * 0.34);
+  paintRoundedRect(context, pane.x + 14, byteBoxY, pane.width - 28, 72, 8, "#fff7f6", "rgba(211, 74, 67, 0.3)");
+  context.fillStyle = "#9f2d28";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Byte-level fallback", pane.x + 28, byteBoxY + 21);
+  context.fillStyle = "#61707f";
+  context.font = "700 10px Inter, system-ui, sans-serif";
+  wrapCanvasText(
+    context,
+    tokenizer.byteFallbackCount > 0
+      ? `${tokenizer.byteFallbackCount} token(s) are raw UTF-8 bytes. Unmerged emoji or underrepresented scripts cost more context.`
+      : "No byte fallbacks in this input. Common ASCII subwords are being merged into larger chunks.",
+    pane.x + 28,
+    byteBoxY + 42,
+    pane.width - 56,
+    14,
+    2,
+  );
+
+  const mergeY = byteBoxY + 100;
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Recent learned merges", pane.x + 14, mergeY);
+
+  tokenizer.topMerges.forEach((merge, index) => {
+    const rowY = mergeY + 18 + index * 28;
+    if (rowY + 22 > pane.y + pane.height - 14) {
+      return;
+    }
+    paintRoundedRect(context, pane.x + 14, rowY, pane.width - 28, 22, 7, "#ffffff", "#d8e0e5");
+    context.fillStyle = "#17212b";
+    context.font = "800 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.textAlign = "left";
+    context.fillText(
+      fitCanvasText(context, `${tokenizerPieceLabel(merge.left)} + ${tokenizerPieceLabel(merge.right)} -> ${tokenizerPieceLabel(merge.merged)}`, pane.width - 96),
+      pane.x + 24,
+      rowY + 15,
+    );
+    context.fillStyle = "#61707f";
+    context.textAlign = "right";
+    context.fillText(`x${merge.count}`, pane.x + pane.width - 24, rowY + 15);
+  });
+
+  context.restore();
+}
+
+function tokenizerPieceLabel(text: string) {
+  if (text === " ") {
+    return "space";
+  }
+
+  return text.replace(/\s/g, "·");
+}
+
+function paintCanvasPanel(
+  context: CanvasRenderingContext2D,
+  pane: CanvasPane,
+) {
+  context.fillStyle = "rgba(255, 255, 255, 0.82)";
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.fillRect(pane.x, pane.y, pane.width, pane.height);
+  context.strokeRect(pane.x, pane.y, pane.width, pane.height);
+}
+
+function paintRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  fill: string,
+  stroke?: string,
+) {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.lineTo(x + width - r, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + r);
+  context.lineTo(x + width, y + height - r);
+  context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  context.lineTo(x + r, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - r);
+  context.lineTo(x, y + r);
+  context.quadraticCurveTo(x, y, x + r, y);
+  context.closePath();
+  context.fillStyle = fill;
+  context.fill();
+  if (stroke) {
+    context.strokeStyle = stroke;
+    context.stroke();
+  }
 }
 
 function paintConvolutionLesson(

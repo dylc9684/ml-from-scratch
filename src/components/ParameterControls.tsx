@@ -141,6 +141,45 @@ function Control({
     );
   }
 
+  if (parameter.kind === "text") {
+    const textValue = String(value ?? parameter.defaultValue);
+    const appendInsert = (insert: string) => {
+      const separator = textValue.length > 0 && !/\s$/.test(textValue) ? " " : "";
+      onChange(`${textValue}${separator}${insert}`);
+    };
+
+    return (
+      <div className="control-card text-control">
+        <label className="control-group">
+          <span className="control-label">
+            <strong>{parameter.label}</strong>
+            <span>{[...textValue].length} chars</span>
+          </span>
+          <textarea
+            rows={parameter.rows ?? 4}
+            value={textValue}
+            placeholder={parameter.placeholder}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </label>
+        {parameter.quickInserts && parameter.quickInserts.length > 0 && (
+          <div className="quick-insert-row" aria-label={`${parameter.label} quick inserts`}>
+            {parameter.quickInserts.map((insert) => (
+              <button
+                className="quick-insert-button"
+                key={insert.label}
+                type="button"
+                onClick={() => appendInsert(insert.value)}
+              >
+                {insert.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (parameter.kind === "matrix") {
     const matrixValue = toMatrixValue(value, parameter.defaultValue);
     const updateCell = (rowIndex: number, columnIndex: number, nextValue: number) => {

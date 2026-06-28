@@ -645,6 +645,7 @@ h1 {
 
 .visual-shell.framework-shell,
 .visual-shell.stochastic-shell,
+.visual-shell.tokenizer-shell,
 .visual-shell.svd-shell,
 .visual-shell.convex-shell,
 .visual-shell.convolution-shell,
@@ -677,6 +678,7 @@ h1 {
 
 .visual-shell.framework-shell canvas,
 .visual-shell.stochastic-shell canvas,
+.visual-shell.tokenizer-shell canvas,
 .visual-shell.svd-shell canvas,
 .visual-shell.convex-shell canvas,
 .visual-shell.convolution-shell canvas,
@@ -1016,6 +1018,46 @@ h1 {
 
 .action-button {
   width: 100%;
+}
+
+.text-control {
+  display: grid;
+  gap: 12px;
+}
+
+.text-control textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px;
+  line-height: 1.45;
+}
+
+.quick-insert-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.quick-insert-button {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  padding: 0 9px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.quick-insert-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .gridworld-control {
@@ -1539,6 +1581,8 @@ select {
   .visual-shell.framework-shell canvas,
   .visual-shell.stochastic-shell,
   .visual-shell.stochastic-shell canvas,
+  .visual-shell.tokenizer-shell,
+  .visual-shell.tokenizer-shell canvas,
   .visual-shell.svd-shell,
   .visual-shell.svd-shell canvas,
   .visual-shell.convex-shell,

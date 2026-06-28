@@ -15,6 +15,7 @@ export const algorithmCategories = [
   "Handling Imbalanced Data",
   "Time Series Fundamentals",
   "Stochastic Processes",
+  "Building a Tokenizer",
   "Dynamic Programming",
   "Singular Value Decomposition",
   "Convex Optimization",
@@ -48,6 +49,11 @@ export type GridWorldValue = {
   rows: number;
   columns: number;
   cells: GridWorldCell[][];
+};
+
+export type TextQuickInsert = {
+  label: string;
+  value: string;
 };
 
 export type ParameterValue =
@@ -109,6 +115,16 @@ export type ToggleParameter = {
   defaultValue: boolean;
 };
 
+export type TextParameter = {
+  kind: "text";
+  id: string;
+  label: string;
+  defaultValue: string;
+  placeholder?: string;
+  rows?: number;
+  quickInserts?: TextQuickInsert[];
+};
+
 export type MatrixParameter = {
   kind: "matrix";
   id: string;
@@ -144,6 +160,7 @@ export type ParameterDefinition =
   | ActionParameter
   | SelectParameter
   | ToggleParameter
+  | TextParameter
   | MatrixParameter
   | ImageParameter
   | GridWorldParameter;
@@ -609,6 +626,34 @@ export type DynamicProgrammingState = {
   policy: DynamicProgrammingPolicyCell[];
 };
 
+export type TokenizerPiece = {
+  text: string;
+  id: number;
+  bytes: number[];
+  byteFallback: boolean;
+  colorIndex: number;
+};
+
+export type TokenizerMerge = {
+  left: string;
+  right: string;
+  merged: string;
+  count: number;
+};
+
+export type TokenizerState = {
+  input: string;
+  pieces: TokenizerPiece[];
+  tokenIds: number[];
+  byteLength: number;
+  characterLength: number;
+  vocabSize: number;
+  mergeCount: number;
+  byteFallbackCount: number;
+  compressionRatio: number;
+  topMerges: TokenizerMerge[];
+};
+
 export type ConceptFrame = {
   type: "concept-demo";
   iteration: number;
@@ -628,6 +673,7 @@ export type ConceptFrame = {
   convex?: ConvexState;
   convolution?: ConvolutionState;
   dynamicProgramming?: DynamicProgrammingState;
+  tokenizer?: TokenizerState;
   summary: string;
 };
 

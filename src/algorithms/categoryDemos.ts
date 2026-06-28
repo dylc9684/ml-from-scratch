@@ -26,6 +26,8 @@ import type {
   OptimizerKey,
   ParameterState,
   FrameworkLayerState,
+  TokenizerMerge,
+  TokenizerPiece,
 } from "../types/algorithm";
 import {
   dynamicProgrammingContent,
@@ -1001,6 +1003,334 @@ const horizon = ${Math.round(numberParam(params, "horizon", 7))};
 const movingAverage = rollingMean(series, windowSize);
 const forecast = extrapolate(movingAverage, horizon);`,
 });
+
+const tokenizerTrainingCorpus = [
+  "tokenization is surprisingly intricate",
+  "tokens become subwords before model inference",
+  "language models compress common text patterns",
+  "byte pair encoding merges frequent adjacent pairs",
+  "machine learning systems count context window tokens",
+  "classification regression optimization and neural networks",
+  "the tokenizer maps text into integer ids",
+  "smaller vocabularies split words into smaller fragments",
+];
+
+type BpeSymbol = {
+  text: string;
+  norm: string;
+  bytes: number[];
+  byteFallback: boolean;
+};
+
+type BpeMergeRule = TokenizerMerge & {
+  leftNorm: string;
+  rightNorm: string;
+  mergedNorm: string;
+};
+
+const tokenizerPalette = ["#d9f2ee", "#e4ecff", "#fff0d8", "#f8dedc", "#eee9ff", "#dcf5e8"];
+
+const buildingTokenizer = makeConceptAlgorithm({
+  id: "building-tokenizer",
+  name: "Building a Tokenizer",
+  category: "Building a Tokenizer",
+  summary: "Shows byte-pair encoding splitting text into subword tokens and integer IDs.",
+  parameters: [
+    {
+      kind: "text",
+      id: "tokenizerText",
+      label: "Playground text",
+      defaultValue: "Tokenization is surprisingly intricate!",
+      placeholder: "Type a sentence to tokenize...",
+      rows: 5,
+      quickInserts: [
+        { label: "Robot", value: "🤖" },
+        { label: "Japanese", value: "こんにちは" },
+        { label: "Arabic", value: "مرحبا" },
+        { label: "Family emoji", value: "👨‍👩‍👧‍👦" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "vocabSize",
+      label: "Vocabulary size",
+      min: 24,
+      max: 96,
+      step: 4,
+      defaultValue: 72,
+      format: "integer",
+    },
+  ],
+  sample: () => makeDataset("Generated tokenizer text sample", [{ x: 0, y: 0, label: "text" }]),
+  formulas: [
+    { title: "Pair counts", expression: "stats[(a,b)]=\\sum_i\\mathbf{1}[(x_i,x_{i+1})=(a,b)]" },
+    { title: "BPE merge", expression: "(a,b)^*=\\arg\\max_{(a,b)} stats[(a,b)]" },
+    { title: "Token overhead", expression: "\\text{overhead}=\\frac{\\text{tokens}}{\\text{characters}}" },
+  ],
+  explanation: [
+    "A tokenizer converts user text into integer token IDs before a language model sees the prompt.",
+    "Byte-pair encoding starts from small symbols and repeatedly merges frequent adjacent pairs, creating reusable subword chunks.",
+    "When the available vocabulary is small or a character is poorly represented, text falls back to smaller byte-level pieces, which consumes more context-window space.",
+  ],
+  engine: (_, params) => {
+    const input = stringParam(params, "tokenizerText", "Tokenization is surprisingly intricate!");
+    const vocabSize = Math.round(numberParam(params, "vocabSize", 72));
+    const mergeBudget = Math.max(0, vocabSize - 24);
+    const rules = trainBpeMergeRules(mergeBudget);
+    const symbols = applyBpeRules(symbolizeForBpe(input), rules);
+    const pieces = symbols.map<TokenizerPiece>((symbol, index) => ({
+      text: symbol.text,
+      id: tokenId(symbol),
+      bytes: symbol.bytes,
+      byteFallback: symbol.byteFallback,
+      colorIndex: index % tokenizerPalette.length,
+    }));
+    const tokenIds = pieces.map((piece) => piece.id);
+    const byteLength = utf8Bytes(input).length;
+    const characterLength = [...input].length;
+    const byteFallbackCount = pieces.filter((piece) => piece.byteFallback).length;
+    const compressionRatio = pieces.length / Math.max(1, characterLength);
+    const topMerges = rules.slice(-6).reverse().map(({ left, right, merged, count }) => ({
+      left,
+      right,
+      merged,
+      count,
+    }));
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: rules.length,
+        points: pieces.map((piece, index) => ({
+          x: index,
+          y: piece.bytes.length,
+          label: piece.text,
+        })),
+        tokenizer: {
+          input,
+          pieces,
+          tokenIds,
+          byteLength,
+          characterLength,
+          vocabSize,
+          mergeCount: rules.length,
+          byteFallbackCount,
+          compressionRatio,
+          topMerges,
+        },
+        summary: `${pieces.length} tokens · ${byteFallbackCount} byte fallback${byteFallbackCount === 1 ? "" : "s"} · vocab ${vocabSize}`,
+      },
+      [
+        { label: "Tokens", value: String(pieces.length) },
+        { label: "Characters", value: String(characterLength) },
+        { label: "Bytes", value: String(byteLength) },
+        { label: "Overhead", value: `${compressionRatio.toFixed(2)}x` },
+      ],
+    );
+  },
+  python: (params) => {
+    const vocabSize = Math.round(numberParam(params, "vocabSize", 72));
+    const text = JSON.stringify(stringParam(params, "tokenizerText", "Tokenization is surprisingly intricate!"));
+
+    return `from collections import Counter
+
+text = ${text}
+vocab_size = ${vocabSize}
+ids = list(text.encode("utf-8"))
+
+def get_stats(ids):
+    pairs = Counter()
+    for a, b in zip(ids, ids[1:]):
+        pairs[(a, b)] += 1
+    return pairs
+
+def merge(ids, pair, new_id):
+    output = []
+    i = 0
+    while i < len(ids):
+        if i < len(ids) - 1 and (ids[i], ids[i + 1]) == pair:
+            output.append(new_id)
+            i += 2
+        else:
+            output.append(ids[i])
+            i += 1
+    return output
+
+for new_id in range(256, vocab_size):
+    pairs = get_stats(ids)
+    if not pairs:
+        break
+    best = max(pairs, key=pairs.get)
+    ids = merge(ids, best, new_id)
+
+print(ids)`;
+  },
+  javascript: (params) => {
+    const vocabSize = Math.round(numberParam(params, "vocabSize", 72));
+    const text = JSON.stringify(stringParam(params, "tokenizerText", "Tokenization is surprisingly intricate!"));
+
+    return `const text = ${text};
+const vocabSize = ${vocabSize};
+let ids = [...new TextEncoder().encode(text)];
+
+function getStats(ids) {
+  const pairs = new Map();
+  for (let i = 0; i < ids.length - 1; i += 1) {
+    const key = \`\${ids[i]},\${ids[i + 1]}\`;
+    pairs.set(key, (pairs.get(key) ?? 0) + 1);
+  }
+  return pairs;
+}
+
+function merge(ids, pair, newId) {
+  const [left, right] = pair.split(",").map(Number);
+  const output = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    if (i < ids.length - 1 && ids[i] === left && ids[i + 1] === right) {
+      output.push(newId);
+      i += 1;
+    } else {
+      output.push(ids[i]);
+    }
+  }
+  return output;
+}
+
+for (let newId = 256; newId < vocabSize; newId += 1) {
+  const pairs = getStats(ids);
+  const best = [...pairs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!best) break;
+  ids = merge(ids, best, newId);
+}
+
+console.log(ids);`;
+  },
+});
+
+function trainBpeMergeRules(mergeBudget: number) {
+  let sequences = tokenizerTrainingCorpus.map(symbolizeForBpe);
+  const rules: BpeMergeRule[] = [];
+
+  for (let step = 0; step < mergeBudget; step += 1) {
+    const best = bestPair(sequences);
+    if (!best || best.count < 2) {
+      break;
+    }
+
+    const rule: BpeMergeRule = {
+      left: best.left,
+      right: best.right,
+      merged: `${best.left}${best.right}`,
+      count: best.count,
+      leftNorm: best.leftNorm,
+      rightNorm: best.rightNorm,
+      mergedNorm: `${best.leftNorm}${best.rightNorm}`,
+    };
+
+    rules.push(rule);
+    sequences = sequences.map((sequence) => mergeBpeSequence(sequence, rule));
+  }
+
+  return rules;
+}
+
+function bestPair(sequences: BpeSymbol[][]) {
+  const stats = new Map<
+    string,
+    { left: string; right: string; leftNorm: string; rightNorm: string; count: number }
+  >();
+
+  sequences.forEach((sequence) => {
+    for (let index = 0; index < sequence.length - 1; index += 1) {
+      const left = sequence[index];
+      const right = sequence[index + 1];
+      const key = `${left.norm}\u0001${right.norm}`;
+      const current = stats.get(key) ?? {
+        left: left.text,
+        right: right.text,
+        leftNorm: left.norm,
+        rightNorm: right.norm,
+        count: 0,
+      };
+      current.count += 1;
+      stats.set(key, current);
+    }
+  });
+
+  return [...stats.values()].sort((a, b) =>
+    b.count === a.count ? `${a.left}${a.right}`.localeCompare(`${b.left}${b.right}`) : b.count - a.count,
+  )[0];
+}
+
+function applyBpeRules(symbols: BpeSymbol[], rules: BpeMergeRule[]) {
+  return rules.reduce((current, rule) => mergeBpeSequence(current, rule), symbols);
+}
+
+function mergeBpeSequence(sequence: BpeSymbol[], rule: BpeMergeRule) {
+  const output: BpeSymbol[] = [];
+
+  for (let index = 0; index < sequence.length; index += 1) {
+    const left = sequence[index];
+    const right = sequence[index + 1];
+
+    if (right && left.norm === rule.leftNorm && right.norm === rule.rightNorm) {
+      output.push({
+        text: `${left.text}${right.text}`,
+        norm: rule.mergedNorm,
+        bytes: [...left.bytes, ...right.bytes],
+        byteFallback: left.byteFallback || right.byteFallback,
+      });
+      index += 1;
+    } else {
+      output.push(left);
+    }
+  }
+
+  return output;
+}
+
+function symbolizeForBpe(text: string) {
+  return [...text].flatMap<BpeSymbol>((character) => {
+    const bytes = utf8Bytes(character);
+    const codePoint = character.codePointAt(0) ?? 0;
+
+    if (codePoint <= 0x7f) {
+      return [
+        {
+          text: character,
+          norm: character.toLowerCase(),
+          bytes,
+          byteFallback: false,
+        },
+      ];
+    }
+
+    return bytes.map((byte) => ({
+      text: `<${byte.toString(16).toUpperCase().padStart(2, "0")}>`,
+      norm: `byte:${byte}`,
+      bytes: [byte],
+      byteFallback: true,
+    }));
+  });
+}
+
+function utf8Bytes(text: string) {
+  return Array.from(new TextEncoder().encode(text));
+}
+
+function tokenId(symbol: BpeSymbol) {
+  if (symbol.byteFallback && symbol.bytes.length === 1) {
+    return symbol.bytes[0];
+  }
+
+  let hash = 2166136261;
+  [...symbol.norm].forEach((character) => {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  });
+
+  return 1000 + Math.abs(hash % 49000);
+}
 
 const stochasticStates = [
   { id: "word-a", label: "Word A", color: "#2f6fbe" },
@@ -5630,6 +5960,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   anomalyDetection,
   imbalancedData,
   timeSeries,
+  buildingTokenizer,
   stochasticProcesses,
   dynamicProgramming,
   singularValueDecomposition,
