@@ -15,6 +15,7 @@ import {
 } from "./data/datasets";
 import { AlgorithmCatalog } from "./components/AlgorithmCatalog";
 import { CodeViewer } from "./components/CodeViewer";
+import { ConceptGraph } from "./components/ConceptGraph";
 import { DatasetPanel } from "./components/DatasetPanel";
 import { EducationPanel } from "./components/EducationPanel";
 import { AlgorithmDeepDive } from "./components/AlgorithmDeepDive";
@@ -312,6 +313,12 @@ export default function App() {
               </span>
             </div>
           </div>
+
+          <ConceptGraph
+            algorithms={algorithms}
+            activeId={activeAlgorithm.id}
+            onSelect={handleAlgorithmSelect}
+          />
 
           <VisualizationCanvas
             frame={currentFrame}
