@@ -1,4 +1,4 @@
-import { ImageUp, Minus, Plus } from "lucide-react";
+import { ImageUp, Minus, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Fragment } from "react";
 import type {
   AlgorithmDefinition,
@@ -7,6 +7,7 @@ import type {
   ParameterDefinition,
   ParameterState,
   ParameterValue,
+  PointSetParameterValue,
 } from "../types/algorithm";
 
 type Props = {
@@ -180,6 +181,39 @@ function Control({
     );
   }
 
+  if (parameter.kind === "point-set") {
+    const pointSet = toPointSetValue(value, parameter.defaultValue);
+    return (
+      <div className="control-card point-set-control">
+        <div className="toggle-row">
+          <div>
+            <strong>{parameter.label}</strong>
+            <p>{pointSet.points.length} points. Click the graph to add more.</p>
+          </div>
+          <div className="stepper-actions" aria-label={`${parameter.label} actions`}>
+            <button
+              className="stepper-button"
+              type="button"
+              aria-label={`Reset ${parameter.label}`}
+              onClick={() => onChange(clonePointSetValue(parameter.defaultValue))}
+            >
+              <RotateCcw size={16} aria-hidden="true" />
+            </button>
+            <button
+              className="stepper-button"
+              type="button"
+              aria-label={`Clear ${parameter.label}`}
+              disabled={pointSet.points.length <= (parameter.minPoints ?? 0)}
+              onClick={() => onChange({ kind: "point-set", points: [] })}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (parameter.kind === "matrix") {
     const matrixValue = toMatrixValue(value, parameter.defaultValue);
     const updateCell = (rowIndex: number, columnIndex: number, nextValue: number) => {
@@ -348,6 +382,36 @@ function Control({
       </div>
     </div>
   );
+}
+
+function toPointSetValue(value: ParameterValue, fallback: PointSetParameterValue): PointSetParameterValue {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "point-set" &&
+    Array.isArray(value.points)
+  ) {
+    return {
+      kind: "point-set",
+      points: value.points
+        .map((point) => ({
+          x: Number(point.x),
+          y: Number(point.y),
+          label: point.label,
+        }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)),
+    };
+  }
+
+  return clonePointSetValue(fallback);
+}
+
+function clonePointSetValue(pointSet: PointSetParameterValue): PointSetParameterValue {
+  return {
+    ...pointSet,
+    points: pointSet.points.map((point) => ({ ...point })),
+  };
 }
 
 function toGridWorldValue(value: ParameterValue, fallback: GridWorldValue) {

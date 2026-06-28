@@ -1,5 +1,5 @@
 import { lessonModules, lessonModuleToAlgorithm } from "../lessons";
-import type { AlgorithmDefinition, GridWorldValue, ParameterState } from "../types/algorithm";
+import type { AlgorithmDefinition, GridWorldValue, ParameterState, PointSetParameterValue } from "../types/algorithm";
 
 export const algorithms: AlgorithmDefinition[] = lessonModules.map(lessonModuleToAlgorithm);
 
@@ -15,9 +15,18 @@ export function makeDefaultParams(algorithm: AlgorithmDefinition): ParameterStat
             }
           : parameter.kind === "gridworld"
             ? cloneGridWorld(parameter.defaultValue)
+            : parameter.kind === "point-set"
+              ? clonePointSet(parameter.defaultValue)
         : parameter.defaultValue;
     return state;
   }, {});
+}
+
+function clonePointSet(pointSet: PointSetParameterValue): PointSetParameterValue {
+  return {
+    ...pointSet,
+    points: pointSet.points.map((point) => ({ ...point })),
+  };
 }
 
 function cloneGridWorld(grid: GridWorldValue): GridWorldValue {

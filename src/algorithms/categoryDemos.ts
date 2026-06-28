@@ -610,6 +610,273 @@ const scores = features.map((feature) => mutualInformation(feature, labels));
 const selected = scores.sort(descending).slice(0, topK);`,
 });
 
+const defaultPolynomialPoints = makeDefaultPolynomialPointSet();
+
+const polynomialFeatures = makeConceptAlgorithm({
+  id: "polynomial-features",
+  name: "Polynomial Features",
+  category: "Feature Engineering & Selection",
+  summary: "Expands x into power columns so linear regression can fit nonlinear curves.",
+  parameters: [
+    {
+      kind: "point-set",
+      id: "polynomialPoints",
+      label: "Curve-fitting points",
+      defaultValue: defaultPolynomialPoints,
+      maxPoints: 42,
+    },
+    {
+      kind: "range",
+      id: "polynomialDegree",
+      label: "Polynomial degree n",
+      min: 1,
+      max: 10,
+      step: 1,
+      defaultValue: 3,
+      format: "integer",
+    },
+  ],
+  sample: () => makeDataset("Generated polynomial S-curve sample", defaultPolynomialPoints.points),
+  formulas: [
+    { title: "Feature expansion", expression: "\\phi_n(x)=[1,x,x^2,\\ldots,x^n]" },
+    { title: "Linear fit on expanded features", expression: "\\hat{y}=\\theta^T\\phi_n(x)" },
+    { title: "Least squares", expression: "\\theta=(\\Phi^T\\Phi+\\lambda I)^{-1}\\Phi^Ty" },
+  ],
+  explanation: [
+    "Polynomial features do not make a new model family; they reshape one input column into many power columns.",
+    "A degree-1 expansion is ordinary linear regression, while degrees 2 or 3 can bend smoothly around nonlinear structure.",
+    "Very high degree can chase individual points and noise, creating jagged curves that fail to generalize.",
+  ],
+  engine: (_, params) => {
+    const degree = Math.max(1, Math.min(10, Math.round(numberParam(params, "polynomialDegree", 3))));
+    const points = pointSetParam(params, "polynomialPoints", defaultPolynomialPoints).points;
+    const usablePoints = points.length >= 2 ? points : defaultPolynomialPoints.points;
+    const fit = fitPolynomialRegression(usablePoints, degree);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: degree,
+        points: usablePoints,
+        series: [
+          {
+            label: `degree ${degree}`,
+            points: fit.curve,
+            color: degree >= 8 ? "#d34a43" : degree <= 1 ? "#64748b" : "#0f766e",
+          },
+        ],
+        polynomial: {
+          degree,
+          points: usablePoints,
+          coefficients: fit.coefficients,
+          curve: fit.curve,
+          featureRows: usablePoints.map((point) => polynomialFeatureRow(point.x, degree)),
+          mse: fit.mse,
+          overfitScore: fit.overfitScore,
+          xDomain: fit.xDomain,
+          yDomain: fit.yDomain,
+        },
+        summary: `degree ${degree} · ${usablePoints.length} points · MSE ${fit.mse.toFixed(3)} · overfit ${Math.round(fit.overfitScore * 100)}%`,
+      },
+      [
+        { label: "Degree", value: String(degree) },
+        { label: "Features", value: String(degree + 1) },
+        { label: "Points", value: String(usablePoints.length) },
+        { label: "MSE", value: fit.mse.toFixed(3) },
+      ],
+    );
+  },
+  python: (params) => {
+    const degree = Math.round(numberParam(params, "polynomialDegree", 3));
+
+    return `import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+degree = ${degree}
+model = make_pipeline(
+    PolynomialFeatures(degree=degree, include_bias=True),
+    LinearRegression(),
+)
+model.fit(X.reshape(-1, 1), y)
+y_hat = model.predict(X_grid.reshape(-1, 1))
+
+# Manual feature expansion:
+powers = np.arange(degree + 1)
+Phi = X[:, None] ** powers[None, :]
+theta = np.linalg.solve(Phi.T @ Phi, Phi.T @ y)`;
+  },
+  javascript: (params) => {
+    const degree = Math.round(numberParam(params, "polynomialDegree", 3));
+
+    return `const degree = ${degree};
+
+function polynomialFeatures(x, degree) {
+  return Array.from({ length: degree + 1 }, (_, power) => x ** power);
+}
+
+const Phi = points.map((point) => polynomialFeatures(point.x, degree));
+const y = points.map((point) => point.y);
+const theta = solveLinearSystem(matMul(transpose(Phi), Phi), matVecMul(transpose(Phi), y));
+
+const curve = xGrid.map((x) => ({
+  x,
+  y: dot(theta, polynomialFeatures(x, degree)),
+}));
+
+// TensorFlow.js equivalent:
+// const powers = tf.range(0, degree + 1);
+// const Phi = tf.pow(tf.expandDims(xs, 1), powers);`;
+  },
+});
+
+function makeDefaultPolynomialPointSet() {
+  const points = Array.from({ length: 17 }, (_, index) => {
+    const x = -3.2 + (index / 16) * 6.4;
+    const wave = 1.05 * Math.sin(1.25 * x) + 0.24 * x;
+    const noise = Math.sin(index * 1.71) * 0.18 + Math.cos(index * 0.83) * 0.08;
+    return {
+      x: round(x),
+      y: round(wave + noise),
+      label: "sample",
+    };
+  });
+
+  return {
+    kind: "point-set" as const,
+    points,
+  };
+}
+
+function pointSetParam(params: ParameterState, key: string, fallback: typeof defaultPolynomialPoints) {
+  const value = params[key];
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "point-set" &&
+    Array.isArray(value.points)
+  ) {
+    return {
+      kind: "point-set" as const,
+      points: value.points
+        .map((point) => ({
+          x: Number(point.x),
+          y: Number(point.y),
+          label: point.label,
+        }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+        .slice(0, 42),
+    };
+  }
+
+  return fallback;
+}
+
+function fitPolynomialRegression(points: DataPoint[], degree: number) {
+  const xValues = points.map((point) => point.x);
+  const yValues = points.map((point) => point.y);
+  const xDomain = expandDomain(Math.min(...xValues), Math.max(...xValues), 0.35);
+  const rawYDomain = expandDomain(Math.min(...yValues), Math.max(...yValues), 0.55);
+  const design = points.map((point) => polynomialFeatureVector(point.x, degree));
+  const gram = multiplyMatrices(transposeMatrix(design), design);
+  const target = multiplyMatrixByColumn(transposeMatrix(design), yValues);
+  const ridge = degree >= 8 ? 1e-8 : 1e-7;
+  const coefficients = solveSymmetricSystem(gram, target, ridge);
+  const curve = Array.from({ length: 180 }, (_, index) => {
+    const x = xDomain[0] + (index / 179) * (xDomain[1] - xDomain[0]);
+    return {
+      x,
+      y: evaluatePolynomial(coefficients, x),
+      label: "fit",
+    };
+  });
+  const predictions = points.map((point) => evaluatePolynomial(coefficients, point.x));
+  const mse =
+    predictions.reduce((sum, prediction, index) => sum + (prediction - yValues[index]) ** 2, 0) /
+    Math.max(1, points.length);
+  const curvature = curve.slice(2).reduce((sum, point, index) => {
+    const previous = curve[index + 1];
+    const before = curve[index];
+    return sum + Math.abs(point.y - 2 * previous.y + before.y);
+  }, 0);
+  const curveYValues = curve.map((point) => point.y).filter(Number.isFinite);
+  const yDomain = expandDomain(
+    Math.max(rawYDomain[0], Math.min(...curveYValues, rawYDomain[0] - 2.5)),
+    Math.min(rawYDomain[1], Math.max(...curveYValues, rawYDomain[1] + 2.5)),
+    0.1,
+  );
+
+  return {
+    coefficients,
+    curve,
+    mse,
+    overfitScore: Math.max(0, Math.min(1, curvature / 80)),
+    xDomain,
+    yDomain,
+  };
+}
+
+function polynomialFeatureVector(x: number, degree: number) {
+  return Array.from({ length: degree + 1 }, (_, power) => x ** power);
+}
+
+function polynomialFeatureRow(x: number, degree: number) {
+  return polynomialFeatureVector(x, degree).map((value, power) => ({
+    power,
+    value,
+  }));
+}
+
+function evaluatePolynomial(coefficients: number[], x: number) {
+  return coefficients.reduce((sum, coefficient, power) => sum + coefficient * x ** power, 0);
+}
+
+function multiplyMatrixByColumn(matrix: number[][], column: number[]) {
+  return matrix.map((row) => row.reduce((sum, value, index) => sum + value * (column[index] ?? 0), 0));
+}
+
+function solveSymmetricSystem(matrix: number[][], target: number[], ridge: number) {
+  const size = matrix.length;
+  const augmented = matrix.map((row, rowIndex) => [
+    ...row.map((value, columnIndex) => value + (rowIndex === columnIndex ? ridge : 0)),
+    target[rowIndex] ?? 0,
+  ]);
+
+  for (let pivot = 0; pivot < size; pivot += 1) {
+    let bestRow = pivot;
+    for (let row = pivot + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][pivot]) > Math.abs(augmented[bestRow][pivot])) {
+        bestRow = row;
+      }
+    }
+    [augmented[pivot], augmented[bestRow]] = [augmented[bestRow], augmented[pivot]];
+
+    const divisor = Math.abs(augmented[pivot][pivot]) < 1e-12 ? 1e-12 : augmented[pivot][pivot];
+    for (let column = pivot; column <= size; column += 1) {
+      augmented[pivot][column] /= divisor;
+    }
+
+    for (let row = 0; row < size; row += 1) {
+      if (row === pivot) {
+        continue;
+      }
+      const factor = augmented[row][pivot];
+      for (let column = pivot; column <= size; column += 1) {
+        augmented[row][column] -= factor * augmented[pivot][column];
+      }
+    }
+  }
+
+  return augmented.map((row) => (Number.isFinite(row[size]) ? row[size] : 0));
+}
+
+function expandDomain(min: number, max: number, pad: number): [number, number] {
+  const span = Math.max(0.5, max - min);
+  return [min - span * pad, max + span * pad];
+}
+
 const modelEvaluation = barAlgorithm({
   id: "model-evaluation",
   name: "Metrics & Cross-Validation",
@@ -1207,6 +1474,490 @@ for (let newId = 256; newId < vocabSize; newId += 1) {
 console.log(ids);`;
   },
 });
+
+const nmfCorpusPresets = {
+  ai: [
+    "Transformer models tokenize prompts, attend to context windows, and learn semantic representations from large corpora.",
+    "Neural retrieval systems embed documents, rank passages, and combine search with generation for question answering.",
+    "Optimization teams monitor loss curves, evaluate hallucination risk, and tune learning rates for stable training runs.",
+    "Prompt engineering workflows compare examples, constraints, and output formats before deploying assistants.",
+  ],
+  health: [
+    "Clinical researchers study protein markers, imaging records, and patient cohorts to detect disease patterns earlier.",
+    "Nutrition teams compare glucose response, sleep quality, exercise habits, and long-term cardiovascular indicators.",
+    "Hospitals optimize scheduling, triage pathways, medication safety, and readmission risk for complex care systems.",
+    "Public health analysts monitor outbreaks, vaccination access, environmental exposure, and local intervention results.",
+  ],
+  markets: [
+    "Portfolio managers track earnings, rates, volatility, liquidity, and sector rotation across global markets.",
+    "Retail teams analyze baskets, promotions, churn, customer lifetime value, and regional demand signals.",
+    "Supply chain planners forecast inventory, supplier delays, fuel costs, and warehouse throughput under uncertainty.",
+    "Risk analysts simulate defaults, fraud patterns, cash flow stress, and capital requirements.",
+  ],
+  generated: [
+    "The lunar bakery optimized croissant inventory with weather forecasts, oven telemetry, and neighborhood foot traffic.",
+    "A museum robot grouped visitor questions into art history, ticketing, accessibility, and gift-shop themes.",
+    "Farm sensors reported soil moisture, drone imagery, seed density, and harvest timing for experimental orchards.",
+    "A tiny newsroom clustered reader mail about transit delays, housing costs, school lunches, and park repairs.",
+  ],
+};
+
+const nmfStopWords = new Set([
+  "about",
+  "across",
+  "after",
+  "also",
+  "and",
+  "before",
+  "for",
+  "from",
+  "into",
+  "that",
+  "the",
+  "their",
+  "this",
+  "under",
+  "with",
+  "your",
+]);
+
+const nmfFacePartLabels = [
+  { id: "faceOvalWeight", label: "Face oval W1", part: "face oval", color: "#2f6fbe", defaultValue: 1.0 },
+  { id: "eyeWeight", label: "Eyes W2", part: "eyes", color: "#0f766e", defaultValue: 0.95 },
+  { id: "browWeight", label: "Brows W3", part: "brows", color: "#b7791f", defaultValue: 0.72 },
+  { id: "noseWeight", label: "Nose W4", part: "nose", color: "#d34a43", defaultValue: 0.82 },
+  { id: "mouthWeight", label: "Mouth W5", part: "mouth", color: "#6f58c9", defaultValue: 0.9 },
+  { id: "cheekWeight", label: "Cheeks W6", part: "cheeks", color: "#258f66", defaultValue: 0.58 },
+];
+
+const nonNegativeMatrixFactorizationLesson = makeConceptAlgorithm({
+  id: "non-negative-matrix-factorization",
+  name: "Non-negative Matrix Factorization",
+  category: "Non-negative Matrix Factorization",
+  summary: "Extracts additive topics from text and rebuilds a face from localized nonnegative parts.",
+  parameters: [
+    {
+      kind: "select",
+      id: "nmfCorpus",
+      label: "Text corpus",
+      defaultValue: "ai",
+      options: [
+        { label: "AI systems", value: "ai" },
+        { label: "Health research", value: "health" },
+        { label: "Markets + operations", value: "markets" },
+        { label: "Generated fake articles", value: "generated" },
+      ],
+    },
+    {
+      kind: "text",
+      id: "nmfArticles",
+      label: "Custom articles",
+      defaultValue: "",
+      placeholder: "Paste multiple articles. Separate documents with blank lines.",
+      rows: 7,
+      quickInserts: [
+        {
+          label: "AI",
+          value:
+            "Embeddings organize search results, transformer layers attend over tokens, and safety teams evaluate model behavior.\n\nVector databases retrieve passages, rerank candidates, and feed grounded context into language-model prompts.",
+        },
+        {
+          label: "Health",
+          value:
+            "Doctors compare imaging scans, lab results, symptoms, and medication histories.\n\nResearchers cluster patient records to reveal treatment response patterns.",
+        },
+        {
+          label: "Fake",
+          value:
+            "A desert observatory cataloged telescope vibrations, mirror dust, and comet reports.\n\nA floating library sorted reader notes about storms, recipes, maps, and old navigation myths.",
+        },
+      ],
+    },
+    {
+      kind: "range",
+      id: "topicCount",
+      label: "Topics k",
+      min: 2,
+      max: 5,
+      step: 1,
+      defaultValue: 3,
+      format: "integer",
+    },
+    {
+      kind: "range",
+      id: "nmfIterations",
+      label: "NMF iterations",
+      min: 12,
+      max: 90,
+      step: 6,
+      defaultValue: 48,
+      format: "integer",
+    },
+    ...nmfFacePartLabels.map((part) => ({
+      kind: "range" as const,
+      id: part.id,
+      label: part.label,
+      min: 0,
+      max: 1.6,
+      step: 0.05,
+      defaultValue: part.defaultValue,
+      format: "decimal" as const,
+    })),
+  ],
+  sample: () => makeDataset("Generated NMF document sample", [{ x: 0, y: 0, label: "documents" }]),
+  formulas: [
+    { title: "Nonnegative factorization", expression: "X\\approx WH,\\quad W\\ge0,\\;H\\ge0" },
+    { title: "Multiplicative update", expression: "H\\leftarrow H\\odot\\frac{W^TX}{W^TWH+\\epsilon}" },
+    { title: "Parts-based reconstruction", expression: "\\hat{x}=\\sum_{j=1}^{k} W_j h_j" },
+  ],
+  explanation: [
+    "NMF forces all factors to stay nonnegative, so components combine additively instead of canceling each other out.",
+    "For text, the topic-word factors become clean semantic clusters because each term can only contribute positive evidence.",
+    "For faces, each basis vector can represent a localized part such as eyes, brows, nose, mouth, or cheeks.",
+  ],
+  engine: (_, params) => {
+    const corpus = stringParam(params, "nmfCorpus", "ai");
+    const customArticles = stringParam(params, "nmfArticles", "");
+    const documents = resolveNmfDocuments(corpus, customArticles);
+    const topicCount = Math.max(2, Math.min(5, Math.round(numberParam(params, "topicCount", 3))));
+    const iterations = Math.max(1, Math.round(numberParam(params, "nmfIterations", 48)));
+    const topicModel = runNmfTopicModel(documents, topicCount, iterations);
+    const faceModel = makeNmfFaceModel(params);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: iterations,
+        points: topicModel.topics.flatMap((topic, topicIndex) =>
+          topic.words.map((word, wordIndex) => ({
+            x: topicIndex + wordIndex / 10,
+            y: word.weight,
+            label: word.term,
+          })),
+        ),
+        bars: topicModel.topics.map((topic, index) => ({
+          label: `T${index + 1}`,
+          value: Math.max(...topic.documentWeights),
+          color: colors[index % colors.length],
+        })),
+        nmf: {
+          documents,
+          vocabulary: topicModel.vocabulary,
+          topicCount,
+          iterations,
+          topics: topicModel.topics,
+          documentTopicMatrix: topicModel.documentTopicMatrix,
+          topicWordMatrix: topicModel.topicWordMatrix,
+          faceOriginal: faceModel.original,
+          faceReconstruction: faceModel.reconstruction,
+          faceParts: faceModel.parts,
+          faceReconstructionError: faceModel.reconstructionError,
+          sparsity: topicModel.sparsity,
+        },
+        summary: `${topicCount} topics · ${topicModel.vocabulary.length} terms · face error ${faceModel.reconstructionError.toFixed(3)}`,
+      },
+      [
+        { label: "Topics", value: String(topicCount) },
+        { label: "Vocabulary", value: String(topicModel.vocabulary.length) },
+        { label: "Sparsity", value: `${Math.round(topicModel.sparsity * 100)}%` },
+        { label: "Face error", value: faceModel.reconstructionError.toFixed(3) },
+      ],
+    );
+  },
+  python: (params) => {
+    const topicCount = Math.round(numberParam(params, "topicCount", 3));
+    const iterations = Math.round(numberParam(params, "nmfIterations", 48));
+
+    return `import numpy as np
+
+# X is a document-term matrix with nonnegative TF-IDF weights.
+k = ${topicCount}
+steps = ${iterations}
+eps = 1e-9
+rng = np.random.default_rng(7)
+W = rng.random((X.shape[0], k)) + 0.1
+H = rng.random((k, X.shape[1])) + 0.1
+
+for _ in range(steps):
+    H *= (W.T @ X) / (W.T @ W @ H + eps)
+    W *= (X @ H.T) / (W @ H @ H.T + eps)
+
+topic_words = np.argsort(H, axis=1)[:, ::-1][:, :8]
+X_hat = W @ H
+
+# Face parts use the same additive idea:
+face_hat = sum(weight[j] * part_basis[j] for j in range(k_face))`;
+  },
+  javascript: (params) => {
+    const topicCount = Math.round(numberParam(params, "topicCount", 3));
+    const iterations = Math.round(numberParam(params, "nmfIterations", 48));
+
+    return `const k = ${topicCount};
+const steps = ${iterations};
+const eps = 1e-9;
+let W = seededPositiveMatrix(X.length, k);
+let H = seededPositiveMatrix(k, X[0].length);
+
+for (let step = 0; step < steps; step += 1) {
+  H = updateByRatio(H, matMul(transpose(W), X), matMul(matMul(transpose(W), W), H), eps);
+  W = updateByRatio(W, matMul(X, transpose(H)), matMul(matMul(W, H), transpose(H)), eps);
+}
+
+const topics = H.map((weights) =>
+  weights
+    .map((weight, term) => ({ term: vocabulary[term], weight }))
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 8)
+);
+
+const faceHat = faceParts.reduce(
+  (image, part, j) => addMatrices(image, scaleMatrix(part, faceWeights[j])),
+  zeros(size, size),
+);`;
+  },
+});
+
+function resolveNmfDocuments(corpus: string, customArticles: string) {
+  const customDocuments = customArticles
+    .split(/\n\s*\n|---+/)
+    .map((document) => document.trim())
+    .filter(Boolean);
+
+  if (customDocuments.length > 0) {
+    return customDocuments.length >= 2 ? customDocuments : splitLongNmfArticle(customDocuments[0]);
+  }
+
+  return nmfCorpusPresets[corpus as keyof typeof nmfCorpusPresets] ?? nmfCorpusPresets.ai;
+}
+
+function splitLongNmfArticle(article: string) {
+  const sentences = article
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  return sentences.length >= 2 ? sentences : [article, article];
+}
+
+function runNmfTopicModel(documents: string[], topicCount: number, iterations: number) {
+  const { matrix, vocabulary } = makeDocumentTermMatrix(documents);
+  const docCount = matrix.length;
+  const termCount = matrix[0]?.length ?? 0;
+  const usableTopics = Math.max(1, Math.min(topicCount, docCount, Math.max(1, termCount)));
+  let w = seededPositiveMatrix(docCount, usableTopics, 3);
+  let h = seededPositiveMatrix(usableTopics, termCount, 13);
+  const epsilon = 1e-8;
+
+  for (let step = 0; step < iterations; step += 1) {
+    const wt = transposeMatrix(w);
+    h = updateByRatio(h, multiplyMatrices(wt, matrix), multiplyMatrices(multiplyMatrices(wt, w), h), epsilon);
+    const ht = transposeMatrix(h);
+    w = updateByRatio(w, multiplyMatrices(matrix, ht), multiplyMatrices(multiplyMatrices(w, h), ht), epsilon);
+    w = normalizeRows(w);
+  }
+
+  const topics = h.map((weights, topicIndex) => {
+    const maxWeight = Math.max(1e-8, ...weights);
+    const words = weights
+      .map((weight, termIndex) => ({
+        term: vocabulary[termIndex],
+        weight: weight / maxWeight,
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 8);
+    const documentWeights = w.map((row) => row[topicIndex] ?? 0);
+    const topDocumentIndex = documentWeights.reduce(
+      (best, value, index) => (value > documentWeights[best] ? index : best),
+      0,
+    );
+
+    return {
+      label: `Topic ${topicIndex + 1}`,
+      words,
+      documentWeights,
+      topDocument: documents[topDocumentIndex] ?? "",
+    };
+  });
+
+  return {
+    vocabulary,
+    topics,
+    documentTopicMatrix: w,
+    topicWordMatrix: h,
+    sparsity: nmfMatrixSparsity(h),
+  };
+}
+
+function makeDocumentTermMatrix(documents: string[]) {
+  const tokenized = documents.map(tokenizeNmfDocument);
+  const documentFrequency = new Map<string, number>();
+  const termFrequency = new Map<string, number>();
+
+  tokenized.forEach((tokens) => {
+    const seen = new Set<string>();
+    tokens.forEach((token) => {
+      termFrequency.set(token, (termFrequency.get(token) ?? 0) + 1);
+      seen.add(token);
+    });
+    seen.forEach((token) => {
+      documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+    });
+  });
+
+  const vocabulary = [...termFrequency.entries()]
+    .map(([term, count]) => ({
+      term,
+      score: count * Math.log(1 + documents.length / Math.max(1, documentFrequency.get(term) ?? 1)),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 42)
+    .map((entry) => entry.term);
+
+  const fallbackVocabulary = ["model", "data", "risk", "system", "signal", "topic"];
+  const terms = vocabulary.length > 0 ? vocabulary : fallbackVocabulary;
+  const matrix = tokenized.map((tokens) => {
+    const counts = new Map<string, number>();
+    tokens.forEach((token) => counts.set(token, (counts.get(token) ?? 0) + 1));
+    const row = terms.map((term) => {
+      const tf = counts.get(term) ?? 0;
+      const df = documentFrequency.get(term) ?? 1;
+      return Math.log1p(tf) * Math.log(1 + documents.length / df);
+    });
+    const norm = Math.max(1e-8, Math.sqrt(row.reduce((sum, value) => sum + value ** 2, 0)));
+    return row.map((value) => value / norm);
+  });
+
+  return { matrix, vocabulary: terms };
+}
+
+function tokenizeNmfDocument(document: string) {
+  return (document.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []).filter(
+    (token) => !nmfStopWords.has(token),
+  );
+}
+
+function seededPositiveMatrix(rows: number, columns: number, salt = 1) {
+  return Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: columns }, (_, column) => {
+      const wave = Math.sin((row + 1) * 12.9898 + (column + 1) * 78.233 + salt) * 43758.5453;
+      return 0.1 + (wave - Math.floor(wave)) * 0.9;
+    }),
+  );
+}
+
+function updateByRatio(
+  factor: number[][],
+  numerator: number[][],
+  denominator: number[][],
+  epsilon: number,
+) {
+  return factor.map((row, rowIndex) =>
+    row.map((value, columnIndex) =>
+      Math.max(
+        1e-8,
+        value * ((numerator[rowIndex]?.[columnIndex] ?? 0) / ((denominator[rowIndex]?.[columnIndex] ?? 0) + epsilon)),
+      ),
+    ),
+  );
+}
+
+function normalizeRows(matrix: number[][]) {
+  return matrix.map((row) => {
+    const total = Math.max(1e-8, row.reduce((sum, value) => sum + value, 0));
+    return row.map((value) => value / total);
+  });
+}
+
+function nmfMatrixSparsity(matrix: number[][]) {
+  const flat = matrix.flat();
+  const maxValue = Math.max(1e-8, ...flat);
+  return flat.filter((value) => value / maxValue < 0.08).length / Math.max(1, flat.length);
+}
+
+function makeNmfFaceModel(params: ParameterState) {
+  const size = 42;
+  const bases = makeNmfFaceBases(size);
+  const weights = nmfFacePartLabels.map((part) => numberParam(params, part.id, part.defaultValue));
+  const canonicalWeights = nmfFacePartLabels.map((part) => part.defaultValue);
+  const original = reconstructNmfFace(bases, canonicalWeights);
+  const reconstruction = reconstructNmfFace(bases, weights);
+  const parts = bases.map((matrix, index) => ({
+    label: nmfFacePartLabels[index].part,
+    weight: weights[index],
+    matrix,
+    color: nmfFacePartLabels[index].color,
+  }));
+
+  return {
+    original,
+    reconstruction,
+    parts,
+    reconstructionError: relativeMatrixError(original, reconstruction),
+  };
+}
+
+function makeNmfFaceBases(size: number) {
+  const center = (size - 1) / 2;
+  const basis = (fn: (x: number, y: number, row: number, column: number) => number) =>
+    Array.from({ length: size }, (_, row) =>
+      Array.from({ length: size }, (_, column) => {
+        const x = (column - center) / center;
+        const y = (row - center) / center;
+        return clampPixel(fn(x, y, row, column));
+      }),
+    );
+
+  return [
+    basis((x, y) => Math.exp(-(x ** 2 / 0.72 + (y + 0.02) ** 2 / 1.05) * 1.35) * 0.76),
+    basis((x, y) =>
+      (Math.exp(-((x + 0.33) ** 2 / 0.012 + (y + 0.2) ** 2 / 0.006)) +
+        Math.exp(-((x - 0.33) ** 2 / 0.012 + (y + 0.2) ** 2 / 0.006))) *
+      0.85,
+    ),
+    basis((x, y) =>
+      (Math.exp(-((x + 0.34) ** 2 / 0.04 + (y + 0.36) ** 2 / 0.004)) +
+        Math.exp(-((x - 0.34) ** 2 / 0.04 + (y + 0.36) ** 2 / 0.004))) *
+      0.7,
+    ),
+    basis((x, y) => Math.exp(-(x ** 2 / 0.018 + (y - 0.02) ** 2 / 0.17)) * 0.72),
+    basis((x, y) => Math.exp(-((y - 0.43 - 0.12 * x ** 2) ** 2 / 0.006 + x ** 2 / 0.16)) * 0.82),
+    basis((x, y) =>
+      (Math.exp(-((x + 0.42) ** 2 / 0.055 + (y - 0.2) ** 2 / 0.05)) +
+        Math.exp(-((x - 0.42) ** 2 / 0.055 + (y - 0.2) ** 2 / 0.05))) *
+      0.45,
+    ),
+  ];
+}
+
+function reconstructNmfFace(parts: number[][][], weights: number[]) {
+  const size = parts[0]?.length ?? 0;
+  const output = zeroMatrix(size, size);
+
+  parts.forEach((part, partIndex) => {
+    const weight = weights[partIndex] ?? 0;
+    for (let row = 0; row < size; row += 1) {
+      for (let column = 0; column < size; column += 1) {
+        output[row][column] += part[row][column] * weight;
+      }
+    }
+  });
+
+  const maxValue = Math.max(1e-8, ...output.flat());
+  return output.map((row) => row.map((value) => clampPixel(value / maxValue)));
+}
+
+function relativeMatrixError(left: number[][], right: number[][]) {
+  let error = 0;
+  let energy = 0;
+  for (let row = 0; row < left.length; row += 1) {
+    for (let column = 0; column < (left[0]?.length ?? 0); column += 1) {
+      const expected = left[row][column] ?? 0;
+      const actual = right[row]?.[column] ?? 0;
+      error += (expected - actual) ** 2;
+      energy += expected ** 2;
+    }
+  }
+  return Math.sqrt(error / Math.max(1e-8, energy));
+}
 
 function trainBpeMergeRules(mergeBudget: number) {
   let sequences = tokenizerTrainingCorpus.map(symbolizeForBpe);
@@ -6204,6 +6955,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   supportVectorMachine,
   knnClassifier,
   featureSelection,
+  polynomialFeatures,
   modelEvaluation,
   biasVariance,
   ensembleMethods,
@@ -6216,6 +6968,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   stochasticProcesses,
   dynamicProgramming,
   singularValueDecomposition,
+  nonNegativeMatrixFactorizationLesson,
   convexOptimization,
   convolutionsFromScratch,
   neuralNetwork,

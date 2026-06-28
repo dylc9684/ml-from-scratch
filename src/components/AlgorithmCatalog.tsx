@@ -110,7 +110,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "KNN & Distance Metrics": "Nearest-neighbor voting and distance geometry.",
   Clustering: "Unsupervised grouping and centroid movement.",
   "Feature Engineering & Selection":
-    "Transforms, encodings, scaling, and feature ranking.",
+    "Polynomial transforms, encodings, scaling, and feature ranking.",
   "Model Evaluation: Metrics, Cross-Validation":
     "Scores, folds, confusion matrices, and validation strategy.",
   "Bias, Variance & the Learning Curve":
@@ -126,6 +126,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Stochastic Processes": "Random walks, noise, transition matrices, and Markov chains.",
   "Dynamic Programming": "Bellman updates, Gridworld values, and optimal policies.",
   "Singular Value Decomposition": "Matrix splitting, low-rank compression, and background/foreground separation.",
+  "Non-negative Matrix Factorization": "Additive topic extraction and localized parts-based image factors.",
   "Convex Optimization": "Constrained bowls, projected steps, Hessians, and convexity checks.",
   "Convolutions from Scratch": "Kernels, padding, stride, and image feature maps.",
   "Neural Networks": "Layered differentiable models trained by backpropagation.",

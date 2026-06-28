@@ -638,6 +638,8 @@ h1 {
 .visual-shell.framework-shell,
 .visual-shell.stochastic-shell,
 .visual-shell.svd-shell,
+.visual-shell.nmf-shell,
+.visual-shell.polynomial-shell,
 .visual-shell.convex-shell,
 .visual-shell.dynamic-programming-shell {
   min-height: 620px;
@@ -647,6 +649,8 @@ h1 {
 .visual-shell.stochastic-shell,
 .visual-shell.tokenizer-shell,
 .visual-shell.svd-shell,
+.visual-shell.nmf-shell,
+.visual-shell.polynomial-shell,
 .visual-shell.convex-shell,
 .visual-shell.convolution-shell,
 .visual-shell.dynamic-programming-shell {
@@ -660,7 +664,8 @@ h1 {
   display: block;
 }
 
-.visual-shell.dynamic-programming-shell canvas {
+.visual-shell.dynamic-programming-shell canvas,
+.visual-shell.polynomial-shell canvas {
   cursor: crosshair;
 }
 
@@ -671,6 +676,8 @@ h1 {
 .visual-shell.framework-shell canvas,
 .visual-shell.stochastic-shell canvas,
 .visual-shell.svd-shell canvas,
+.visual-shell.nmf-shell canvas,
+.visual-shell.polynomial-shell canvas,
 .visual-shell.convex-shell canvas,
 .visual-shell.dynamic-programming-shell canvas {
   min-height: 620px;
@@ -680,6 +687,8 @@ h1 {
 .visual-shell.stochastic-shell canvas,
 .visual-shell.tokenizer-shell canvas,
 .visual-shell.svd-shell canvas,
+.visual-shell.nmf-shell canvas,
+.visual-shell.polynomial-shell canvas,
 .visual-shell.convex-shell canvas,
 .visual-shell.convolution-shell canvas,
 .visual-shell.dynamic-programming-shell canvas {
@@ -1585,6 +1594,10 @@ select {
   .visual-shell.tokenizer-shell canvas,
   .visual-shell.svd-shell,
   .visual-shell.svd-shell canvas,
+  .visual-shell.nmf-shell,
+  .visual-shell.nmf-shell canvas,
+  .visual-shell.polynomial-shell,
+  .visual-shell.polynomial-shell canvas,
   .visual-shell.convex-shell,
   .visual-shell.convex-shell canvas,
   .visual-shell.convolution-shell,

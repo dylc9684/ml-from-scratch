@@ -259,6 +259,36 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Pick k with validation, domain knowledge, or an elbow/silhouette analysis.",
     ],
   },
+  "polynomial-features": {
+    graphTitle: "What the curve and matrix are showing",
+    graphNotes: [
+      "The curve is still linear regression, but it is fitting columns like x, x^2, and x^3 instead of only raw x.",
+      "Hovering a point reveals the exact feature row created from that one x coordinate.",
+      "Higher degree lowers training error at first, then can create sharp bends that memorize noise.",
+    ],
+    complexity: {
+      time: "Feature expansion is O(n d) with d=degree+1; solving least squares is roughly O(d^3 + n d^2).",
+      prediction: "O(d) per x value after the coefficients are learned.",
+      space: "O(n d) for the expanded feature matrix Phi.",
+      plainEnglish:
+        "The expensive part is not making powers of x; it is solving for more coefficients as degree grows.",
+      terms: [
+        { label: "points n", weight: 68 },
+        { label: "degree d", weight: 78 },
+        { label: "matrix solve d^3", weight: 62 },
+      ],
+    },
+    realWorld: [
+      "Adding curvature to simple regression baselines before trying a neural network.",
+      "Modeling calibration curves, dose-response curves, sensor drift, and smooth physical trends.",
+      "Teaching overfitting because high-degree polynomials can look excellent on training points and awful between them.",
+    ],
+    keyDetails: [
+      "Polynomial features make linear models nonlinear in x while staying linear in the learned coefficients.",
+      "Scaling x matters because high powers can explode numerically.",
+      "Validation error, not training error, should decide the useful degree.",
+    ],
+  },
   "building-tokenizer": {
     graphTitle: "What the tokenizer graph is showing",
     graphNotes: [
@@ -288,6 +318,37 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Token IDs are not words; they are learned chunks that may be words, word pieces, spaces, or bytes.",
       "Small vocabularies reduce the lookup table but increase token overhead.",
       "Byte fallback makes every string encodable, but poorly represented text becomes more expensive.",
+    ],
+  },
+  "non-negative-matrix-factorization": {
+    graphTitle: "What the NMF panels are showing",
+    graphNotes: [
+      "The topic panel factors a document-term matrix into document-topic weights and topic-word weights.",
+      "The sorted bars show which words contribute positive evidence for each topic.",
+      "The face panel uses the same additive rule: changing one W weight changes one localized part.",
+    ],
+    complexity: {
+      time: "O(t n d k) for multiplicative updates on an n by d matrix with k topics.",
+      prediction: "O(d k) to infer topic weights for a new document with fixed topic-word factors.",
+      space: "O(n k + k d) for W and H, plus O(n d) if the full input matrix is kept.",
+      plainEnglish:
+        "Every update multiplies the document-term matrix by the current factors, so documents, vocabulary size, topics, and iterations all matter.",
+      terms: [
+        { label: "documents n", weight: 68 },
+        { label: "terms d", weight: 76 },
+        { label: "topics k", weight: 58 },
+        { label: "iterations t", weight: 62 },
+      ],
+    },
+    realWorld: [
+      "Topic modeling for article collections, support tickets, research abstracts, and product reviews.",
+      "Parts-based decomposition for faces, medical imagery, audio spectrograms, and nonnegative sensor readings.",
+      "Interpretable feature discovery when negative cancellation would make factors harder to explain.",
+    ],
+    keyDetails: [
+      "NMF is not unique; different initial factors or k values can produce different but valid decompositions.",
+      "Nonnegativity encourages parts to add together, which often makes topics and face components easier to inspect than SVD factors.",
+      "Text preprocessing matters: stop words, vocabulary size, and TF-IDF scaling strongly shape the topics.",
     ],
   },
 };

@@ -45,6 +45,7 @@ type CanvasPane = {
 export function VisualizationCanvas({ frame, algorithm, params, onParamChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 820, height: 420 });
+  const [polynomialHoverIndex, setPolynomialHoverIndex] = useState<number | null>(null);
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
   const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);
@@ -52,6 +53,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isFrameworkLesson = frame?.type === "concept-demo" && Boolean(frame.framework);
   const isStochasticLesson = frame?.type === "concept-demo" && Boolean(frame.stochastic);
   const isSvdLesson = frame?.type === "concept-demo" && Boolean(frame.svd);
+  const isNmfLesson = frame?.type === "concept-demo" && Boolean(frame.nmf);
+  const isPolynomialLesson = frame?.type === "concept-demo" && Boolean(frame.polynomial);
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
   const isDynamicProgrammingLesson = frame?.type === "concept-demo" && Boolean(frame.dynamicProgramming);
@@ -81,15 +84,15 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       return;
     }
 
-    draw(canvas, size, frame);
-  }, [frame, size]);
+    draw(canvas, size, frame, { polynomialHoverIndex });
+  }, [frame, size, polynomialHoverIndex]);
 
   const handleCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (
       frame?.type !== "concept-demo" ||
-      !frame.dynamicProgramming ||
       !params ||
-      !onParamChange
+      !onParamChange ||
+      (!frame.dynamicProgramming && !frame.polynomial)
     ) {
       return;
     }
@@ -104,6 +107,30 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
       y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
     };
+
+    if (frame.polynomial) {
+      const nextPoint = canvasPointToPolynomialPoint(frame.polynomial, size, point);
+      if (!nextPoint) {
+        return;
+      }
+
+      const currentPointSet =
+        typeof params.polynomialPoints === "object" &&
+        params.polynomialPoints !== null &&
+        "kind" in params.polynomialPoints &&
+        params.polynomialPoints.kind === "point-set"
+          ? params.polynomialPoints
+          : { kind: "point-set" as const, points: frame.polynomial.points };
+      const nextPoints = [...currentPointSet.points, { ...nextPoint, label: "custom" }].slice(-42);
+      onParamChange("polynomialPoints", { kind: "point-set", points: nextPoints });
+      setPolynomialHoverIndex(nextPoints.length - 1);
+      return;
+    }
+
+    if (!frame.dynamicProgramming) {
+      return;
+    }
+
     const hit = hitTestDynamicProgrammingGrid(frame.dynamicProgramming, size, point);
     if (!hit) {
       return;
@@ -112,6 +139,30 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
     const tool = gridWorldPaintTool(params.paintTool);
     const nextGrid = paintGridWorldCell(frame.dynamicProgramming.grid, hit.row, hit.column, tool);
     onParamChange("gridWorld", nextGrid);
+  };
+
+  const handleCanvasMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (frame?.type !== "concept-demo" || !frame.polynomial) {
+      if (polynomialHoverIndex !== null) {
+        setPolynomialHoverIndex(null);
+      }
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    const point = {
+      x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
+      y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
+    };
+    const nextIndex = hitTestPolynomialPoint(frame.polynomial, size, point);
+    if (nextIndex !== polynomialHoverIndex) {
+      setPolynomialHoverIndex(nextIndex);
+    }
   };
 
   return (
@@ -124,6 +175,10 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
         isStochasticLesson ? "stochastic-shell" : ""
       } ${
         isSvdLesson ? "svd-shell" : ""
+      } ${
+        isNmfLesson ? "nmf-shell" : ""
+      } ${
+        isPolynomialLesson ? "polynomial-shell" : ""
       } ${
         isConvexLesson ? "convex-shell" : ""
       } ${
@@ -139,6 +194,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
         key={isConvexLesson ? "webgl-convex" : "canvas-2d"}
         ref={canvasRef}
         onClick={handleCanvasClick}
+        onMouseMove={handleCanvasMove}
+        onMouseLeave={() => setPolynomialHoverIndex(null)}
       />
       <div className="canvas-readout">
         {frame ? (
@@ -158,6 +215,7 @@ function draw(
   canvas: HTMLCanvasElement,
   size: Size,
   frame: AlgorithmFrame | null,
+  interaction: { polynomialHoverIndex?: number | null } = {},
 ) {
   const ratio = window.devicePixelRatio || 1;
   canvas.width = Math.floor(size.width * ratio);
@@ -211,6 +269,16 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.svd) {
     paintSvdLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.nmf) {
+    paintNmfLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.polynomial) {
+    paintPolynomialLesson(context, frame, size, interaction.polynomialHoverIndex ?? null);
     return;
   }
 
@@ -2150,6 +2218,603 @@ function tokenizerPieceLabel(text: string) {
   }
 
   return text.replace(/\s/g, "·");
+}
+
+function paintNmfLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const nmf = frame.nmf;
+  if (!nmf) {
+    return;
+  }
+
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const topicPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(320, size.height * 0.48) }
+    : { x: padding, y: 58, width: Math.max(460, size.width * 0.55), height: size.height - 96 };
+  const facePane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: topicPane.y + topicPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(330, size.height - topicPane.height - 120),
+      }
+    : {
+        x: topicPane.x + topicPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - topicPane.width - gap,
+        height: size.height - 96,
+      };
+
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Topic extraction workbench", topicPane.x, topicPane.y - 24);
+  context.fillText("Face decomposition slider", facePane.x, facePane.y - 24);
+
+  paintNmfTopicPane(context, nmf, topicPane);
+  paintNmfFacePane(context, nmf, facePane);
+}
+
+function paintNmfTopicPane(
+  context: CanvasRenderingContext2D,
+  nmf: NonNullable<ConceptFrame["nmf"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`${nmf.documents.length} documents -> W x H`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${nmf.vocabulary.length} terms · ${nmf.iterations} multiplicative updates · sparsity ${Math.round(nmf.sparsity * 100)}%`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const matrixTop = pane.y + 64;
+  const matrixHeight = Math.min(98, pane.height * 0.18);
+  const matrixGap = 10;
+  const matrixWidth = (pane.width - 28 - matrixGap * 2) / 3;
+  paintNmfMiniMatrix(context, "X docs x terms", nmf.documents.length, nmf.vocabulary.length, {
+    x: pane.x + 14,
+    y: matrixTop,
+    width: matrixWidth,
+    height: matrixHeight,
+  }, "#64748b");
+  paintNmfMiniMatrix(context, "W docs x topics", nmf.documentTopicMatrix.length, nmf.topicCount, {
+    x: pane.x + 14 + matrixWidth + matrixGap,
+    y: matrixTop,
+    width: matrixWidth,
+    height: matrixHeight,
+  }, "#2f6fbe", nmf.documentTopicMatrix);
+  paintNmfMiniMatrix(context, "H topics x words", nmf.topicCount, nmf.vocabulary.length, {
+    x: pane.x + 14 + (matrixWidth + matrixGap) * 2,
+    y: matrixTop,
+    width: matrixWidth,
+    height: matrixHeight,
+  }, "#0f766e", nmf.topicWordMatrix);
+
+  const topicTop = matrixTop + matrixHeight + 24;
+  const topicGap = 10;
+  const columns = pane.width > 620 ? 2 : 1;
+  const rows = Math.ceil(nmf.topics.length / columns);
+  const cardWidth = (pane.width - 28 - topicGap * (columns - 1)) / columns;
+  const cardHeight = Math.max(104, Math.min(150, (pane.y + pane.height - topicTop - 16 - topicGap * (rows - 1)) / rows));
+
+  nmf.topics.forEach((topic, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    paintNmfTopicCard(context, topic, index, {
+      x: pane.x + 14 + column * (cardWidth + topicGap),
+      y: topicTop + row * (cardHeight + topicGap),
+      width: cardWidth,
+      height: cardHeight,
+    });
+  });
+
+  context.restore();
+}
+
+function paintNmfTopicCard(
+  context: CanvasRenderingContext2D,
+  topic: NonNullable<ConceptFrame["nmf"]>["topics"][number],
+  topicIndex: number,
+  box: CanvasPane,
+) {
+  const color = colors[topicIndex % colors.length];
+  paintRoundedRect(context, box.x, box.y, box.width, box.height, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = color;
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(topic.label, box.x + 12, box.y + 18);
+
+  const topWeight = Math.max(1e-8, ...topic.words.map((word) => word.weight));
+  const barX = box.x + 12;
+  const barY = box.y + 32;
+  const barWidth = box.width - 24;
+  const barHeight = 12;
+  topic.words.slice(0, 5).forEach((word, index) => {
+    const y = barY + index * 18;
+    const width = (word.weight / topWeight) * barWidth;
+    context.fillStyle = "#eef3f6";
+    context.fillRect(barX, y, barWidth, barHeight);
+    context.fillStyle = color;
+    context.fillRect(barX, y, width, barHeight);
+    context.fillStyle = "#17212b";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.fillText(fitCanvasText(context, word.term, barWidth - 8), barX + 5, y + 9);
+  });
+
+  context.fillStyle = "#61707f";
+  context.font = "700 9px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  wrapCanvasText(context, topic.topDocument, box.x + 12, box.y + box.height - 26, box.width - 24, 12, 2);
+}
+
+function paintNmfMiniMatrix(
+  context: CanvasRenderingContext2D,
+  label: string,
+  rows: number,
+  columns: number,
+  box: CanvasPane,
+  color: string,
+  matrix?: number[][],
+) {
+  paintRoundedRect(context, box.x, box.y, box.width, box.height, 8, "#f7fafc", "#d8e0e5");
+  const grid = {
+    x: box.x + 10,
+    y: box.y + 24,
+    width: box.width - 20,
+    height: box.height - 44,
+  };
+  const visibleRows = Math.min(rows, 10);
+  const visibleColumns = Math.min(columns, 16);
+  const cellWidth = grid.width / Math.max(1, visibleColumns);
+  const cellHeight = grid.height / Math.max(1, visibleRows);
+  const values = matrix?.flat() ?? [];
+  const maxValue = Math.max(1e-8, ...values);
+
+  for (let row = 0; row < visibleRows; row += 1) {
+    for (let column = 0; column < visibleColumns; column += 1) {
+      const value = matrix ? matrix[row]?.[column] ?? 0 : ((row + column) % 4) / 4;
+      const alpha = 0.16 + Math.min(1, value / maxValue) * 0.7;
+      context.fillStyle = `${color}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`;
+      context.fillRect(
+        grid.x + column * cellWidth,
+        grid.y + row * cellHeight,
+        Math.ceil(cellWidth),
+        Math.ceil(cellHeight),
+      );
+    }
+  }
+
+  context.fillStyle = "#17212b";
+  context.font = "900 9px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(fitCanvasText(context, label, box.width - 12), box.x + box.width / 2, box.y + 15);
+  context.fillStyle = "#61707f";
+  context.font = "800 8px Inter, system-ui, sans-serif";
+  context.fillText(`${rows}x${columns}`, box.x + box.width / 2, box.y + box.height - 10);
+}
+
+function paintNmfFacePane(
+  context: CanvasRenderingContext2D,
+  nmf: NonNullable<ConceptFrame["nmf"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Parts add without cancellation", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `Move one W column weight: only its localized facial part changes. Error ${nmf.faceReconstructionError.toFixed(3)}`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const top = pane.y + 64;
+  const imageGap = 12;
+  const imageHeight = Math.min(210, Math.max(150, pane.height * 0.34));
+  const imageWidth = (pane.width - 28 - imageGap) / 2;
+  paintSvdImageBox(context, "canonical face", nmf.faceOriginal, {
+    x: pane.x + 14,
+    y: top,
+    width: imageWidth,
+    height: imageHeight,
+  });
+  paintSvdImageBox(context, "W-weighted face", nmf.faceReconstruction, {
+    x: pane.x + 14 + imageWidth + imageGap,
+    y: top,
+    width: imageWidth,
+    height: imageHeight,
+  });
+
+  const partTop = top + imageHeight + 34;
+  const partGap = 10;
+  const columns = pane.width > 420 ? 3 : 2;
+  const partWidth = (pane.width - 28 - partGap * (columns - 1)) / columns;
+  const partHeight = Math.max(78, Math.min(112, (pane.y + pane.height - partTop - 16) / 2));
+
+  nmf.faceParts.forEach((part, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const box = {
+      x: pane.x + 14 + column * (partWidth + partGap),
+      y: partTop + row * (partHeight + partGap),
+      width: partWidth,
+      height: partHeight,
+    };
+    paintNmfFacePart(context, part, box);
+  });
+
+  context.restore();
+}
+
+function paintNmfFacePart(
+  context: CanvasRenderingContext2D,
+  part: NonNullable<ConceptFrame["nmf"]>["faceParts"][number],
+  box: CanvasPane,
+) {
+  paintRoundedRect(context, box.x, box.y, box.width, box.height, 8, "#ffffff", "#d8e0e5");
+  const imageSize = Math.min(box.height - 22, box.width * 0.42);
+  const imageBox = {
+    x: box.x + 8,
+    y: box.y + 10,
+    width: imageSize,
+    height: imageSize,
+  };
+  paintSvdImageBox(context, "", part.matrix, imageBox);
+
+  context.fillStyle = part.color;
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, part.label, box.width - imageSize - 24), imageBox.x + imageSize + 8, box.y + 22);
+  context.fillStyle = "#eef3f6";
+  context.fillRect(imageBox.x + imageSize + 8, box.y + 34, box.width - imageSize - 24, 10);
+  context.fillStyle = part.color;
+  context.fillRect(imageBox.x + imageSize + 8, box.y + 34, (box.width - imageSize - 24) * Math.min(1, part.weight / 1.6), 10);
+  context.fillStyle = "#61707f";
+  context.font = "800 9px Inter, system-ui, sans-serif";
+  context.fillText(`W=${part.weight.toFixed(2)}`, imageBox.x + imageSize + 8, box.y + 58);
+}
+
+function paintPolynomialLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+  hoverIndex: number | null,
+) {
+  const polynomial = frame.polynomial;
+  if (!polynomial) {
+    return;
+  }
+
+  const layout = polynomialLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Live curve-fitting sandbox", layout.plotPane.x, layout.plotPane.y - 24);
+  context.fillText("Feature matrix expansion", layout.matrixPane.x, layout.matrixPane.y - 24);
+
+  paintPolynomialPlot(context, polynomial, layout.plotPane, hoverIndex);
+  paintPolynomialFeaturePanel(context, polynomial, layout.matrixPane, hoverIndex);
+}
+
+function polynomialLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const plotPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(330, size.height * 0.5) }
+    : { x: padding, y: 58, width: Math.max(470, size.width * 0.58), height: size.height - 96 };
+  const matrixPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: plotPane.y + plotPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(310, size.height - plotPane.height - 120),
+      }
+    : {
+        x: plotPane.x + plotPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - plotPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { plotPane, matrixPane };
+}
+
+function polynomialPlotArea(pane: CanvasPane): CanvasPane {
+  return {
+    x: pane.x + 52,
+    y: pane.y + 72,
+    width: pane.width - 78,
+    height: pane.height - 126,
+  };
+}
+
+function polynomialScales(polynomial: NonNullable<ConceptFrame["polynomial"]>, pane: CanvasPane) {
+  const plot = polynomialPlotArea(pane);
+  return {
+    plot,
+    x: d3.scaleLinear().domain(polynomial.xDomain).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain(polynomial.yDomain).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintPolynomialPlot(
+  context: CanvasRenderingContext2D,
+  polynomial: NonNullable<ConceptFrame["polynomial"]>,
+  pane: CanvasPane,
+  hoverIndex: number | null,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const overfit = polynomial.degree >= 8 || polynomial.overfitScore > 0.58;
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`Degree ${polynomial.degree}: ${polynomial.degree === 1 ? "straight line" : overfit ? "overfit risk" : "curved fit"}`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `${polynomial.points.length} points · ${polynomial.degree + 1} power columns · MSE ${polynomial.mse.toFixed(3)}`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const { plot, x, y } = polynomialScales(polynomial, pane);
+  context.fillStyle = "rgba(247, 250, 252, 0.9)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  context.strokeStyle = "rgba(100, 116, 139, 0.18)";
+  context.lineWidth = 1;
+  x.ticks(7).forEach((tick) => {
+    const tx = x(tick);
+    context.beginPath();
+    context.moveTo(tx, plot.y);
+    context.lineTo(tx, plot.y + plot.height);
+    context.stroke();
+  });
+  y.ticks(6).forEach((tick) => {
+    const ty = y(tick);
+    context.beginPath();
+    context.moveTo(plot.x, ty);
+    context.lineTo(plot.x + plot.width, ty);
+    context.stroke();
+  });
+
+  context.strokeStyle = "#c9d4da";
+  context.beginPath();
+  context.moveTo(plot.x, y(0));
+  context.lineTo(plot.x + plot.width, y(0));
+  context.moveTo(x(0), plot.y);
+  context.lineTo(x(0), plot.y + plot.height);
+  context.stroke();
+
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  context.strokeStyle = overfit ? "#d34a43" : polynomial.degree === 1 ? "#64748b" : "#0f766e";
+  context.lineWidth = overfit ? 3.2 : 2.8;
+  context.beginPath();
+  polynomial.curve.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      return;
+    }
+    if (index === 0) {
+      context.moveTo(px, py);
+    } else {
+      context.lineTo(px, py);
+    }
+  });
+  context.stroke();
+  context.restore();
+
+  polynomial.points.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    const active = index === hoverIndex;
+    context.fillStyle = active ? "#fff7ed" : "#2f6fbe";
+    context.strokeStyle = active ? "#b7791f" : "#ffffff";
+    context.lineWidth = active ? 3 : 1.6;
+    context.beginPath();
+    context.arc(px, py, active ? 7 : 5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  });
+
+  const statusBox = {
+    x: pane.x + 14,
+    y: pane.y + pane.height - 42,
+    width: pane.width - 28,
+    height: 26,
+  };
+  paintRoundedRect(context, statusBox.x, statusBox.y, statusBox.width, statusBox.height, 8, overfit ? "#fff7f6" : "#f7fafc", overfit ? "rgba(211, 74, 67, 0.3)" : "#d8e0e5");
+  context.fillStyle = overfit ? "#9f2d28" : "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(
+      context,
+      overfit
+        ? "High-degree polynomial is starting to chase individual points. Try degree 2 or 3 for a smoother general trend."
+        : "Click inside the plot to add a point. Hover a point to inspect its expanded feature row.",
+      statusBox.width - 16,
+    ),
+    statusBox.x + 8,
+    statusBox.y + 17,
+  );
+
+  context.restore();
+}
+
+function paintPolynomialFeaturePanel(
+  context: CanvasRenderingContext2D,
+  polynomial: NonNullable<ConceptFrame["polynomial"]>,
+  pane: CanvasPane,
+  hoverIndex: number | null,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const selectedIndex = hoverIndex ?? 0;
+  const selectedPoint = polynomial.points[selectedIndex] ?? polynomial.points[0];
+  const featureRow = polynomial.featureRows[selectedIndex] ?? polynomial.featureRows[0] ?? [];
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("One x becomes many columns", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      selectedPoint
+        ? `Selected x=${selectedPoint.x.toFixed(2)}, y=${selectedPoint.y.toFixed(2)}`
+        : "Hover a point to inspect its row.",
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const rowY = pane.y + 72;
+  const chipGap = 8;
+  const chipColumns = pane.width > 440 ? 3 : 2;
+  const chipWidth = (pane.width - 28 - chipGap * (chipColumns - 1)) / chipColumns;
+  const chipHeight = 42;
+  featureRow.forEach((cell, index) => {
+    const column = index % chipColumns;
+    const row = Math.floor(index / chipColumns);
+    const x = pane.x + 14 + column * (chipWidth + chipGap);
+    const y = rowY + row * (chipHeight + chipGap);
+    if (y + chipHeight > pane.y + pane.height - 176) {
+      return;
+    }
+    paintRoundedRect(context, x, y, chipWidth, chipHeight, 8, "#ffffff", "#d8e0e5");
+    context.fillStyle = index === 0 ? "#64748b" : colors[(index - 1) % colors.length];
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(polynomialPowerLabel(cell.power), x + 9, y + 15);
+    context.fillStyle = "#17212b";
+    context.font = "800 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.fillText(fitCanvasText(context, formatPolynomialNumber(cell.value), chipWidth - 18), x + 9, y + 31);
+  });
+
+  const coefficientTop = pane.y + Math.max(250, pane.height * 0.54);
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Learned coefficients theta", pane.x + 14, coefficientTop);
+  const coeffValues = polynomial.coefficients.slice(0, Math.min(11, polynomial.coefficients.length));
+  const maxCoeff = Math.max(1e-8, ...coeffValues.map((value) => Math.abs(value)));
+  coeffValues.forEach((coefficient, index) => {
+    const y = coefficientTop + 18 + index * 18;
+    if (y + 12 > pane.y + pane.height - 18) {
+      return;
+    }
+    const labelWidth = 34;
+    const barWidth = pane.width - 28 - labelWidth - 48;
+    const centerX = pane.x + 14 + labelWidth + barWidth / 2;
+    context.fillStyle = "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.textAlign = "right";
+    context.fillText(`θ${index}`, pane.x + 14 + labelWidth - 6, y + 9);
+    context.fillStyle = "#eef3f6";
+    context.fillRect(centerX - barWidth / 2, y, barWidth, 10);
+    context.fillStyle = coefficient >= 0 ? "#0f766e" : "#d34a43";
+    const width = (Math.abs(coefficient) / maxCoeff) * (barWidth / 2);
+    context.fillRect(coefficient >= 0 ? centerX : centerX - width, y, width, 10);
+    context.fillStyle = "#61707f";
+    context.textAlign = "left";
+    context.fillText(formatPolynomialNumber(coefficient), centerX + barWidth / 2 + 7, y + 9);
+  });
+
+  context.restore();
+}
+
+function polynomialPowerLabel(power: number) {
+  if (power === 0) {
+    return "bias 1";
+  }
+  if (power === 1) {
+    return "x";
+  }
+  return `x^${power}`;
+}
+
+function formatPolynomialNumber(value: number) {
+  if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) {
+    return value.toExponential(2);
+  }
+  return value.toFixed(Math.abs(value) >= 10 ? 1 : 3);
+}
+
+function hitTestPolynomialPoint(
+  polynomial: NonNullable<ConceptFrame["polynomial"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const { plotPane } = polynomialLayout(size);
+  const { x, y } = polynomialScales(polynomial, plotPane);
+  let nearestIndex: number | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  polynomial.points.forEach((dataPoint, index) => {
+    const distance = Math.hypot(point.x - x(dataPoint.x), point.y - y(dataPoint.y));
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  });
+
+  return nearestIndex !== null && nearestDistance <= 14 ? nearestIndex : null;
+}
+
+function canvasPointToPolynomialPoint(
+  polynomial: NonNullable<ConceptFrame["polynomial"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const { plotPane } = polynomialLayout(size);
+  const { plot, x, y } = polynomialScales(polynomial, plotPane);
+  if (
+    point.x < plot.x ||
+    point.x > plot.x + plot.width ||
+    point.y < plot.y ||
+    point.y > plot.y + plot.height
+  ) {
+    return null;
+  }
+
+  return {
+    x: Number(x.invert(point.x).toFixed(3)),
+    y: Number(y.invert(point.y).toFixed(3)),
+  };
 }
 
 function paintCanvasPanel(

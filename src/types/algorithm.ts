@@ -18,6 +18,7 @@ export const algorithmCategories = [
   "Building a Tokenizer",
   "Dynamic Programming",
   "Singular Value Decomposition",
+  "Non-negative Matrix Factorization",
   "Convex Optimization",
   "Convolutions from Scratch",
   "Neural Networks",
@@ -51,6 +52,11 @@ export type GridWorldValue = {
   cells: GridWorldCell[][];
 };
 
+export type PointSetParameterValue = {
+  kind: "point-set";
+  points: DataPoint[];
+};
+
 export type TextQuickInsert = {
   label: string;
   value: string;
@@ -62,7 +68,8 @@ export type ParameterValue =
   | boolean
   | MatrixParameterValue
   | ImageMatrixParameterValue
-  | GridWorldValue;
+  | GridWorldValue
+  | PointSetParameterValue;
 
 export type ParameterState = Record<string, ParameterValue>;
 
@@ -154,6 +161,15 @@ export type GridWorldParameter = {
   defaultValue: GridWorldValue;
 };
 
+export type PointSetParameter = {
+  kind: "point-set";
+  id: string;
+  label: string;
+  defaultValue: PointSetParameterValue;
+  minPoints?: number;
+  maxPoints?: number;
+};
+
 export type ParameterDefinition =
   | NumericParameter
   | StepperParameter
@@ -163,7 +179,8 @@ export type ParameterDefinition =
   | TextParameter
   | MatrixParameter
   | ImageParameter
-  | GridWorldParameter;
+  | GridWorldParameter
+  | PointSetParameter;
 
 export type DataPoint = {
   x: number;
@@ -542,6 +559,57 @@ export type SvdState = {
   geometry: SvdGeometryState;
 };
 
+export type NmfTopicWord = {
+  term: string;
+  weight: number;
+};
+
+export type NmfTopicState = {
+  label: string;
+  words: NmfTopicWord[];
+  documentWeights: number[];
+  topDocument: string;
+};
+
+export type NmfFacePartState = {
+  label: string;
+  weight: number;
+  matrix: MatrixParameterValue;
+  color: string;
+};
+
+export type NmfState = {
+  documents: string[];
+  vocabulary: string[];
+  topicCount: number;
+  iterations: number;
+  topics: NmfTopicState[];
+  documentTopicMatrix: MatrixParameterValue;
+  topicWordMatrix: MatrixParameterValue;
+  faceOriginal: MatrixParameterValue;
+  faceReconstruction: MatrixParameterValue;
+  faceParts: NmfFacePartState[];
+  faceReconstructionError: number;
+  sparsity: number;
+};
+
+export type PolynomialFeatureRow = {
+  power: number;
+  value: number;
+};
+
+export type PolynomialState = {
+  degree: number;
+  points: DataPoint[];
+  coefficients: number[];
+  curve: DataPoint[];
+  featureRows: PolynomialFeatureRow[][];
+  mse: number;
+  overfitScore: number;
+  xDomain: [number, number];
+  yDomain: [number, number];
+};
+
 export type ConvexOptimizerKey = "projected-gradient" | "newton";
 
 export type ConvexStatus = "convex" | "non-convex";
@@ -692,6 +760,8 @@ export type ConceptFrame = {
   framework?: FrameworkState;
   stochastic?: StochasticState;
   svd?: SvdState;
+  nmf?: NmfState;
+  polynomial?: PolynomialState;
   convex?: ConvexState;
   convolution?: ConvolutionState;
   dynamicProgramming?: DynamicProgrammingState;
