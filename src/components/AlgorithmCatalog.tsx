@@ -118,6 +118,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Ensemble Methods: Boosting, Bagging, Stacking":
     "Combining learners for stronger predictions.",
   "Hyperparameter Tuning": "Search strategies and validation feedback.",
+  "Regularization and Noise": "Ridge shrinkage, Lasso pruning, noisy fits, and coefficient stability.",
   "Naive Bayes": "Probabilistic classification with conditional assumptions.",
   "Anomaly Detection": "Outlier scoring and unusual-pattern discovery.",
   "Handling Imbalanced Data": "Sampling, class weights, and threshold tradeoffs.",
@@ -127,6 +128,7 @@ const categoryNotes: Record<AlgorithmCategory, string> = {
   "Dynamic Programming": "Bellman updates, Gridworld values, and optimal policies.",
   "Singular Value Decomposition": "Matrix splitting, low-rank compression, and background/foreground separation.",
   "Non-negative Matrix Factorization": "Additive topic extraction and localized parts-based image factors.",
+  "Determinants & Linear Transformations": "Area scale, orientation, grid warps, and eigenvalue products.",
   "Convex Optimization": "Constrained bowls, projected steps, Hessians, and convexity checks.",
   "Convolutions from Scratch": "Kernels, padding, stride, and image feature maps.",
   "Neural Networks": "Layered differentiable models trained by backpropagation.",

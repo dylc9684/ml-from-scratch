@@ -46,6 +46,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<Size>({ width: 820, height: 420 });
   const [polynomialHoverIndex, setPolynomialHoverIndex] = useState<number | null>(null);
+  const [determinantDrag, setDeterminantDrag] = useState<"basisI" | "basisJ" | null>(null);
   const isBackpropLesson = frame?.type === "concept-demo" && Boolean(frame.backprop);
   const isActivationLesson = frame?.type === "concept-demo" && Boolean(frame.activation);
   const isLossLesson = frame?.type === "concept-demo" && Boolean(frame.loss);
@@ -55,6 +56,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isSvdLesson = frame?.type === "concept-demo" && Boolean(frame.svd);
   const isNmfLesson = frame?.type === "concept-demo" && Boolean(frame.nmf);
   const isPolynomialLesson = frame?.type === "concept-demo" && Boolean(frame.polynomial);
+  const isDeterminantLesson = frame?.type === "concept-demo" && Boolean(frame.determinant);
+  const isRegularizationLesson = frame?.type === "concept-demo" && Boolean(frame.regularization);
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
   const isDynamicProgrammingLesson = frame?.type === "concept-demo" && Boolean(frame.dynamicProgramming);
@@ -142,6 +145,32 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   };
 
   const handleCanvasMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (frame?.type === "concept-demo" && frame.determinant && determinantDrag && onParamChange) {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const bounds = canvas.getBoundingClientRect();
+      const point = {
+        x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
+        y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
+      };
+      const vector = canvasPointToDeterminantVector(frame.determinant, size, point);
+      if (!vector) {
+        return;
+      }
+
+      if (determinantDrag === "basisI") {
+        onParamChange("matrixA", vector.x);
+        onParamChange("matrixC", vector.y);
+      } else {
+        onParamChange("matrixB", vector.x);
+        onParamChange("matrixD", vector.y);
+      }
+      return;
+    }
+
     if (frame?.type !== "concept-demo" || !frame.polynomial) {
       if (polynomialHoverIndex !== null) {
         setPolynomialHoverIndex(null);
@@ -165,6 +194,27 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
     }
   };
 
+  const handleCanvasMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (frame?.type !== "concept-demo" || !frame.determinant || !params || !onParamChange) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    const point = {
+      x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * size.width,
+      y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * size.height,
+    };
+    const handle = hitTestDeterminantHandle(frame.determinant, size, point);
+    if (handle) {
+      setDeterminantDrag(handle);
+    }
+  };
+
   return (
     <section
       className={`visual-shell ${isBackpropLesson ? "backprop-shell" : ""} ${
@@ -180,6 +230,10 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       } ${
         isPolynomialLesson ? "polynomial-shell" : ""
       } ${
+        isDeterminantLesson ? "determinant-shell" : ""
+      } ${
+        isRegularizationLesson ? "regularization-shell" : ""
+      } ${
         isConvexLesson ? "convex-shell" : ""
       } ${
         isConvolutionLesson ? "convolution-shell" : ""
@@ -194,8 +248,13 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
         key={isConvexLesson ? "webgl-convex" : "canvas-2d"}
         ref={canvasRef}
         onClick={handleCanvasClick}
+        onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleCanvasMove}
-        onMouseLeave={() => setPolynomialHoverIndex(null)}
+        onMouseUp={() => setDeterminantDrag(null)}
+        onMouseLeave={() => {
+          setPolynomialHoverIndex(null);
+          setDeterminantDrag(null);
+        }}
       />
       <div className="canvas-readout">
         {frame ? (
@@ -279,6 +338,16 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.polynomial) {
     paintPolynomialLesson(context, frame, size, interaction.polynomialHoverIndex ?? null);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.determinant) {
+    paintDeterminantLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.regularization) {
+    paintRegularizationLesson(context, frame, size);
     return;
   }
 
@@ -2814,6 +2883,916 @@ function canvasPointToPolynomialPoint(
   return {
     x: Number(x.invert(point.x).toFixed(3)),
     y: Number(y.invert(point.y).toFixed(3)),
+  };
+}
+
+function paintDeterminantLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const determinant = frame.determinant;
+  if (!determinant) {
+    return;
+  }
+
+  const layout = determinantLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Area and grid transformation", layout.plotPane.x, layout.plotPane.y - 24);
+  context.fillText("Eigenvalue connection", layout.infoPane.x, layout.infoPane.y - 24);
+
+  paintDeterminantPlot(context, determinant, layout.plotPane);
+  paintDeterminantInfo(context, determinant, layout.infoPane);
+}
+
+function determinantLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const plotPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(350, size.height * 0.54) }
+    : { x: padding, y: 58, width: Math.max(470, size.width * 0.62), height: size.height - 96 };
+  const infoPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: plotPane.y + plotPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(280, size.height - plotPane.height - 120),
+      }
+    : {
+        x: plotPane.x + plotPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - plotPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { plotPane, infoPane };
+}
+
+function determinantPlotArea(pane: CanvasPane): CanvasPane {
+  return {
+    x: pane.x + 44,
+    y: pane.y + 64,
+    width: pane.width - 74,
+    height: pane.height - 112,
+  };
+}
+
+function determinantPlotScales(
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  pane: CanvasPane,
+) {
+  const plot = determinantPlotArea(pane);
+  const coordinates = [
+    ...determinant.transformedSquare,
+    determinant.basisI,
+    determinant.basisJ,
+    { x: 1, y: 1 },
+    { x: -1, y: -1 },
+  ];
+  const limit = Math.max(
+    3.2,
+    ...coordinates.flatMap((point) => [Math.abs(point.x), Math.abs(point.y)]),
+  ) + 0.35;
+  return {
+    plot,
+    limit,
+    x: d3.scaleLinear().domain([-limit, limit]).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain([-limit, limit]).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintDeterminantPlot(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const signColor = determinantColor(determinant.orientation);
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`det(A) = ${formatDeterminantNumber(determinant.determinant)}`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `Area scale ${determinant.areaScale.toFixed(2)}x · ${determinant.orientation === "negative" ? "orientation flips" : determinant.orientation === "zero" ? "collapsed onto a line" : "orientation preserved"}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const { plot, x, y } = determinantPlotScales(determinant, pane);
+  context.fillStyle = "rgba(247, 250, 252, 0.92)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  paintDeterminantOriginalGrid(context, determinant, plot, x, y);
+  paintDeterminantTransformedGrid(context, determinant, plot, x, y);
+  paintDeterminantAxes(context, plot, x, y);
+  paintDeterminantSquares(context, determinant, x, y, signColor);
+  paintDeterminantEigenvectors(context, determinant, plot, x, y);
+  paintDeterminantBasisArrows(context, determinant, x, y);
+
+  const chip = {
+    x: plot.x + 12,
+    y: plot.y + 12,
+    width: Math.min(230, plot.width - 24),
+    height: 40,
+  };
+  paintRoundedRect(context, chip.x, chip.y, chip.width, chip.height, 8, "#ffffff", signColor);
+  context.fillStyle = signColor;
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`Area Scale = ${determinant.areaScale.toFixed(2)}x`, chip.x + 12, chip.y + 17);
+  context.fillStyle = "#61707f";
+  context.font = "800 9px Inter, system-ui, sans-serif";
+  context.fillText(`${determinant.orientation.toUpperCase()} determinant`, chip.x + 12, chip.y + 31);
+
+  context.restore();
+}
+
+function paintDeterminantOriginalGrid(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  const ticks = d3.range(-4, 4.1, 1);
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  context.strokeStyle = "rgba(100, 116, 139, 0.12)";
+  context.lineWidth = 1;
+  ticks.forEach((tick) => {
+    context.beginPath();
+    context.moveTo(x(tick), plot.y);
+    context.lineTo(x(tick), plot.y + plot.height);
+    context.moveTo(plot.x, y(tick));
+    context.lineTo(plot.x + plot.width, y(tick));
+    context.stroke();
+  });
+
+  context.setLineDash([5, 4]);
+  context.strokeStyle = "rgba(100, 116, 139, 0.45)";
+  context.lineWidth = 1.4;
+  drawDeterminantPolygon(context, determinant.unitSquare, x, y, false);
+  context.setLineDash([]);
+  context.restore();
+}
+
+function paintDeterminantTransformedGrid(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  const [a, b] = determinant.matrix[0];
+  const [c, d] = determinant.matrix[1];
+  const ticks = d3.range(-5, 5.1, 1);
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  context.strokeStyle = determinant.orientation === "negative" ? "rgba(211, 74, 67, 0.22)" : "rgba(47, 111, 190, 0.24)";
+  context.lineWidth = 1.15;
+  ticks.forEach((tick) => {
+    const verticalA = determinantTransformForCanvas(a, b, c, d, tick, -5);
+    const verticalB = determinantTransformForCanvas(a, b, c, d, tick, 5);
+    const horizontalA = determinantTransformForCanvas(a, b, c, d, -5, tick);
+    const horizontalB = determinantTransformForCanvas(a, b, c, d, 5, tick);
+    context.beginPath();
+    context.moveTo(x(verticalA.x), y(verticalA.y));
+    context.lineTo(x(verticalB.x), y(verticalB.y));
+    context.moveTo(x(horizontalA.x), y(horizontalA.y));
+    context.lineTo(x(horizontalB.x), y(horizontalB.y));
+    context.stroke();
+  });
+  context.restore();
+}
+
+function paintDeterminantAxes(
+  context: CanvasRenderingContext2D,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  context.strokeStyle = "#aebbc4";
+  context.lineWidth = 1.3;
+  context.beginPath();
+  context.moveTo(plot.x, y(0));
+  context.lineTo(plot.x + plot.width, y(0));
+  context.moveTo(x(0), plot.y);
+  context.lineTo(x(0), plot.y + plot.height);
+  context.stroke();
+}
+
+function paintDeterminantSquares(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+  signColor: string,
+) {
+  context.save();
+  context.fillStyle = `${signColor}2b`;
+  context.strokeStyle = signColor;
+  context.lineWidth = 2.6;
+  drawDeterminantPolygon(context, determinant.transformedSquare, x, y, true);
+  context.restore();
+}
+
+function paintDeterminantEigenvectors(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  determinant.eigenvalues.forEach((eigenvalue) => {
+    if (!eigenvalue.vector || Math.abs(eigenvalue.imaginary) > 1e-7) {
+      return;
+    }
+    const span = 5;
+    context.strokeStyle = eigenvalue.color;
+    context.lineWidth = 2;
+    context.setLineDash([7, 5]);
+    context.beginPath();
+    context.moveTo(x(-eigenvalue.vector.x * span), y(-eigenvalue.vector.y * span));
+    context.lineTo(x(eigenvalue.vector.x * span), y(eigenvalue.vector.y * span));
+    context.stroke();
+    context.setLineDash([]);
+  });
+  context.restore();
+}
+
+function paintDeterminantBasisArrows(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  paintDeterminantArrow(context, x(0), y(0), x(determinant.basisI.x), y(determinant.basisI.y), "#2f6fbe", "col 1");
+  paintDeterminantArrow(context, x(0), y(0), x(determinant.basisJ.x), y(determinant.basisJ.y), "#0f766e", "col 2");
+}
+
+function paintDeterminantArrow(
+  context: CanvasRenderingContext2D,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  color: string,
+  label: string,
+) {
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(fromX, fromY);
+  context.lineTo(toX, toY);
+  context.stroke();
+  context.translate(toX, toY);
+  context.rotate(angle);
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(-11, -5);
+  context.lineTo(-11, 5);
+  context.closePath();
+  context.fill();
+  context.rotate(-angle);
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = color;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(0, 0, 8, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.fillStyle = color;
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, 10, -10);
+  context.restore();
+}
+
+function paintDeterminantInfo(
+  context: CanvasRenderingContext2D,
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+  const signColor = determinantColor(determinant.orientation);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Matrix A", pane.x + 14, pane.y + 22);
+
+  const matrixBox = {
+    x: pane.x + 14,
+    y: pane.y + 42,
+    width: pane.width - 28,
+    height: 104,
+  };
+  paintRoundedRect(context, matrixBox.x, matrixBox.y, matrixBox.width, matrixBox.height, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = "#17212b";
+  context.font = "900 22px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textAlign = "center";
+  const cellWidth = matrixBox.width / 2;
+  const rows = determinant.matrix;
+  rows.forEach((row, rowIndex) => {
+    row.forEach((value, columnIndex) => {
+      context.fillText(
+        formatDeterminantNumber(value),
+        matrixBox.x + cellWidth * columnIndex + cellWidth / 2,
+        matrixBox.y + 42 + rowIndex * 36,
+      );
+    });
+  });
+  context.fillStyle = "#61707f";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.fillText("[ a  b ]", matrixBox.x + matrixBox.width / 2, matrixBox.y + matrixBox.height - 10);
+
+  const formulaY = matrixBox.y + matrixBox.height + 28;
+  paintRoundedRect(context, pane.x + 14, formulaY, pane.width - 28, 78, 8, determinant.orientation === "negative" ? "#fff7f6" : "#f7fafc", `${signColor}66`);
+  context.fillStyle = signColor;
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Signed area", pane.x + 28, formulaY + 22);
+  context.fillStyle = "#17212b";
+  context.font = "800 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const [[a, b], [c, d]] = determinant.matrix;
+  context.fillText(
+    `ad - bc = (${formatDeterminantNumber(a)})( ${formatDeterminantNumber(d)} ) - (${formatDeterminantNumber(b)})( ${formatDeterminantNumber(c)} )`,
+    pane.x + 28,
+    formulaY + 46,
+  );
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(`det(A) = ${formatDeterminantNumber(determinant.determinant)}`, pane.x + 28, formulaY + 64);
+
+  const eigenY = formulaY + 104;
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.fillText("Eigenvalues", pane.x + 14, eigenY);
+
+  determinant.eigenvalues.forEach((eigenvalue, index) => {
+    const rowY = eigenY + 18 + index * 52;
+    paintRoundedRect(context, pane.x + 14, rowY, pane.width - 28, 40, 8, "#ffffff", eigenvalue.color);
+    context.fillStyle = eigenvalue.color;
+    context.font = "900 11px Inter, system-ui, sans-serif";
+    context.fillText(eigenvalue.label, pane.x + 28, rowY + 16);
+    context.fillStyle = "#17212b";
+    context.font = "800 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.fillText(formatEigenvalue(eigenvalue.real, eigenvalue.imaginary), pane.x + 28, rowY + 32);
+  });
+
+  const productY = eigenY + 132;
+  paintRoundedRect(context, pane.x + 14, productY, pane.width - 28, 78, 8, "#f7fafc", "#d8e0e5");
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.fillText("Product connection", pane.x + 28, productY + 22);
+  context.fillStyle = "#61707f";
+  context.font = "800 11px Inter, system-ui, sans-serif";
+  wrapCanvasText(
+    context,
+    determinant.eigenvalues.some((value) => Math.abs(value.imaginary) > 1e-7)
+      ? "Complex conjugate eigenvalues have no real direction line, but their product still equals the determinant."
+      : "Real eigenvector lines are directions that the transformation only stretches or flips.",
+    pane.x + 28,
+    productY + 42,
+    pane.width - 56,
+    14,
+    2,
+  );
+  context.fillStyle = signColor;
+  context.font = "900 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const lambdaProduct = determinantEigenvalueProduct(determinant.eigenvalues);
+  context.fillText(
+    `det = λ1 λ2 = ${formatDeterminantNumber(lambdaProduct)}`,
+    pane.x + 28,
+    productY + 68,
+  );
+
+  context.restore();
+}
+
+function drawDeterminantPolygon(
+  context: CanvasRenderingContext2D,
+  points: Array<{ x: number; y: number }>,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+  fill: boolean,
+) {
+  context.beginPath();
+  points.forEach((point, index) => {
+    if (index === 0) {
+      context.moveTo(x(point.x), y(point.y));
+    } else {
+      context.lineTo(x(point.x), y(point.y));
+    }
+  });
+  context.closePath();
+  if (fill) {
+    context.fill();
+  }
+  context.stroke();
+}
+
+function determinantTransformForCanvas(
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  x: number,
+  y: number,
+) {
+  return {
+    x: a * x + b * y,
+    y: c * x + d * y,
+  };
+}
+
+function determinantColor(orientation: NonNullable<ConceptFrame["determinant"]>["orientation"]) {
+  if (orientation === "negative") {
+    return "#d34a43";
+  }
+  if (orientation === "zero") {
+    return "#b7791f";
+  }
+  return "#2f6fbe";
+}
+
+function formatDeterminantNumber(value: number) {
+  if (Math.abs(value) < 0.001) {
+    return "0.000";
+  }
+  return value.toFixed(Math.abs(value) >= 10 ? 1 : 3);
+}
+
+function formatEigenvalue(real: number, imaginary: number) {
+  if (Math.abs(imaginary) < 1e-7) {
+    return formatDeterminantNumber(real);
+  }
+  return `${formatDeterminantNumber(real)} ${imaginary >= 0 ? "+" : "-"} ${formatDeterminantNumber(Math.abs(imaginary))}i`;
+}
+
+function determinantEigenvalueProduct(
+  eigenvalues: NonNullable<ConceptFrame["determinant"]>["eigenvalues"],
+) {
+  if (eigenvalues.length < 2) {
+    return eigenvalues[0]?.real ?? 0;
+  }
+  if (eigenvalues.some((value) => Math.abs(value.imaginary) > 1e-7)) {
+    const first = eigenvalues[0];
+    return first.real ** 2 + first.imaginary ** 2;
+  }
+  return eigenvalues[0].real * eigenvalues[1].real;
+}
+
+function paintRegularizationLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const regularization = frame.regularization;
+  if (!regularization) {
+    return;
+  }
+
+  const layout = regularizationLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Regularization tug-of-war", layout.plotPane.x, layout.plotPane.y - 24);
+  context.fillText("Weight elimination ledger", layout.ledgerPane.x, layout.ledgerPane.y - 24);
+
+  paintRegularizationPlot(context, regularization, layout.plotPane);
+  paintRegularizationLedger(context, regularization, layout.ledgerPane);
+}
+
+function regularizationLayout(size: Size) {
+  const narrow = size.width < 840;
+  const padding = 24;
+  const gap = 18;
+  const plotPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(360, size.height * 0.52) }
+    : { x: padding, y: 58, width: Math.max(500, size.width * 0.62), height: size.height - 96 };
+  const ledgerPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: plotPane.y + plotPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(300, size.height - plotPane.height - 120),
+      }
+    : {
+        x: plotPane.x + plotPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - plotPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { plotPane, ledgerPane };
+}
+
+function regularizationPlotArea(pane: CanvasPane): CanvasPane {
+  const legendY = pane.y + 56;
+  const legendHeight = regularizationLegendHeight(pane);
+  const y = legendY + legendHeight + 14;
+  const bottomReserve = 66;
+
+  return {
+    x: pane.x + 52,
+    y,
+    width: pane.width - 78,
+    height: Math.max(150, pane.y + pane.height - bottomReserve - y),
+  };
+}
+
+function regularizationLegendHeight(pane: CanvasPane) {
+  return pane.width < 560 ? 54 : 30;
+}
+
+function regularizationScales(
+  regularization: NonNullable<ConceptFrame["regularization"]>,
+  pane: CanvasPane,
+) {
+  const plot = regularizationPlotArea(pane);
+  return {
+    plot,
+    x: d3.scaleLinear().domain(regularization.xDomain).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain(regularization.yDomain).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintRegularizationPlot(
+  context: CanvasRenderingContext2D,
+  regularization: NonNullable<ConceptFrame["regularization"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const methodColor = regularization.method === "lasso" ? "#6f58c9" : "#0f766e";
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    `${regularization.method === "lasso" ? "Lasso" : "Ridge"} on a degree-${regularization.degree} polynomial`,
+    pane.x + 14,
+    pane.y + 22,
+  );
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `alpha ${regularization.alpha.toFixed(2)} · noise ${regularization.noise.toFixed(2)} · MSE ${regularization.mse.toFixed(3)} vs alpha-0 ${regularization.unregularizedMse.toFixed(3)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const legendItems = [
+    { label: "true signal", color: "#64748b", dashed: true },
+    { label: "alpha 0 chases noise", color: "#d34a43", dashed: true },
+    { label: regularization.method === "lasso" ? "lasso fit" : "ridge fit", color: methodColor },
+  ];
+  paintRegularizationLegend(context, legendItems, pane);
+
+  const { plot, x, y } = regularizationScales(regularization, pane);
+  context.fillStyle = "rgba(247, 250, 252, 0.92)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.lineWidth = 1;
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  context.strokeStyle = "rgba(100, 116, 139, 0.16)";
+  x.ticks(7).forEach((tick) => {
+    const tx = x(tick);
+    context.beginPath();
+    context.moveTo(tx, plot.y);
+    context.lineTo(tx, plot.y + plot.height);
+    context.stroke();
+  });
+  y.ticks(6).forEach((tick) => {
+    const ty = y(tick);
+    context.beginPath();
+    context.moveTo(plot.x, ty);
+    context.lineTo(plot.x + plot.width, ty);
+    context.stroke();
+  });
+
+  context.strokeStyle = "#c9d4da";
+  context.lineWidth = 1.2;
+  context.beginPath();
+  context.moveTo(plot.x, y(0));
+  context.lineTo(plot.x + plot.width, y(0));
+  context.moveTo(x(0), plot.y);
+  context.lineTo(x(0), plot.y + plot.height);
+  context.stroke();
+
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  drawRegularizationCurve(context, regularization.signalCurve, x, y, "#64748b", 2.2, [6, 6]);
+  drawRegularizationCurve(context, regularization.unregularizedCurve, x, y, "#d34a43", 2.2, [3, 5]);
+  drawRegularizationCurve(context, regularization.regularizedCurve, x, y, methodColor, 3.2);
+  context.restore();
+
+  regularization.points.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    context.fillStyle = colors[index % colors.length];
+    context.globalAlpha = 0.86;
+    context.beginPath();
+    context.arc(px, py, 4.8, 0, Math.PI * 2);
+    context.fill();
+    context.globalAlpha = 1;
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 1.3;
+    context.stroke();
+  });
+
+  const note = regularization.method === "lasso"
+    ? "Lasso pays for absolute weight size, so some polynomial columns drop exactly to zero."
+    : "Ridge pays for squared weight size, so the whole high-degree curve smooths out together.";
+  paintRoundedRect(context, pane.x + 14, pane.y + pane.height - 44, pane.width - 28, 28, 8, "#f7fafc", `${methodColor}55`);
+  context.fillStyle = methodColor;
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, note, pane.width - 48), pane.x + 24, pane.y + pane.height - 26);
+  context.restore();
+}
+
+function paintRegularizationLegend(
+  context: CanvasRenderingContext2D,
+  legendItems: Array<{ label: string; color: string; dashed?: boolean }>,
+  pane: CanvasPane,
+) {
+  const x = pane.x + 14;
+  const y = pane.y + 56;
+  const width = pane.width - 28;
+  const height = regularizationLegendHeight(pane);
+  const compact = height > 34;
+  const columns = compact ? 2 : 3;
+  const gap = 8;
+  const chipWidth = (width - gap * (columns - 1)) / columns;
+  const chipHeight = 20;
+
+  paintRoundedRect(context, x, y, width, height, 8, "#ffffff", "#d8e0e5");
+  legendItems.forEach((item, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const chipX = x + column * (chipWidth + gap) + 8;
+    const chipY = y + 7 + row * 22;
+    context.strokeStyle = item.color;
+    context.lineWidth = 2.4;
+    if (item.dashed) {
+      context.setLineDash([5, 4]);
+    }
+    context.beginPath();
+    context.moveTo(chipX, chipY + chipHeight / 2);
+    context.lineTo(chipX + 24, chipY + chipHeight / 2);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = "#17212b";
+    context.font = "800 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(fitCanvasText(context, item.label, chipWidth - 40), chipX + 32, chipY + 14);
+  });
+}
+
+function drawRegularizationCurve(
+  context: CanvasRenderingContext2D,
+  points: DataPoint[],
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+  color: string,
+  width: number,
+  dash?: number[],
+) {
+  if (points.length < 2) {
+    return;
+  }
+
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  if (dash) {
+    context.setLineDash(dash);
+  }
+  context.beginPath();
+  points.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      return;
+    }
+    if (index === 0) {
+      context.moveTo(px, py);
+    } else {
+      context.lineTo(px, py);
+    }
+  });
+  context.stroke();
+  context.restore();
+}
+
+function paintRegularizationLedger(
+  context: CanvasRenderingContext2D,
+  regularization: NonNullable<ConceptFrame["regularization"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  const methodColor = regularization.method === "lasso" ? "#6f58c9" : "#0f766e";
+  const eliminatedCount = regularization.weights.filter((weight) => weight.eliminated).length;
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Coefficient sizes beta", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      regularization.method === "lasso"
+        ? `${eliminatedCount} weights eliminated · ${regularization.activeWeights} active columns`
+        : `${regularization.activeWeights} active columns · weights shrink without hard deletion`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const chart = {
+    x: pane.x + 38,
+    y: pane.y + 84,
+    width: pane.width - 68,
+    height: Math.max(154, pane.height - 252),
+  };
+  paintRoundedRect(context, chart.x, chart.y, chart.width, chart.height, 8, "#f7fafc", "#d8e0e5");
+  const maxAbs = Math.max(
+    0.1,
+    ...regularization.weights.flatMap((weight) => [Math.abs(weight.value), Math.abs(weight.unregularizedValue)]),
+  );
+  const yScale = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([chart.y + chart.height - 22, chart.y + 20]);
+  const baseline = yScale(0);
+  context.strokeStyle = "#aebbc4";
+  context.lineWidth = 1.2;
+  context.beginPath();
+  context.moveTo(chart.x + 8, baseline);
+  context.lineTo(chart.x + chart.width - 8, baseline);
+  context.stroke();
+
+  const step = chart.width / Math.max(1, regularization.weights.length);
+  const barWidth = Math.min(22, Math.max(9, step * 0.42));
+  regularization.weights.forEach((weight, index) => {
+    const centerX = chart.x + step * index + step / 2;
+    drawRegularizationWeightBar(context, centerX, barWidth + 8, baseline, yScale(weight.unregularizedValue), "rgba(100, 116, 139, 0.18)");
+    drawRegularizationWeightBar(
+      context,
+      centerX,
+      barWidth,
+      baseline,
+      yScale(weight.value),
+      weight.eliminated ? "rgba(211, 74, 67, 0.18)" : weight.value >= 0 ? methodColor : "#d34a43",
+    );
+
+    if (weight.eliminated) {
+      context.strokeStyle = "#d34a43";
+      context.lineWidth = 1.8;
+      context.beginPath();
+      context.moveTo(centerX - barWidth / 2, baseline - 5);
+      context.lineTo(centerX + barWidth / 2, baseline + 5);
+      context.moveTo(centerX + barWidth / 2, baseline - 5);
+      context.lineTo(centerX - barWidth / 2, baseline + 5);
+      context.stroke();
+    }
+
+    context.fillStyle = weight.eliminated ? "#d34a43" : "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(weight.label, centerX, chart.y + chart.height - 7);
+  });
+
+  context.fillStyle = "#61707f";
+  context.font = "800 9px Inter, system-ui, sans-serif";
+  context.textAlign = "right";
+  context.fillText(formatPolynomialNumber(maxAbs), chart.x - 8, chart.y + 24);
+  context.fillText("0", chart.x - 8, baseline + 3);
+  context.fillText(formatPolynomialNumber(-maxAbs), chart.x - 8, chart.y + chart.height - 24);
+
+  const cardTop = chart.y + chart.height + 16;
+  const cards = [
+    {
+      title: regularization.method === "lasso" ? "L1 penalty" : "L2 penalty",
+      text: regularization.method === "lasso"
+        ? "Sparse result: some high-power columns vanish."
+        : "Smooth result: weights shrink together.",
+    },
+    {
+      title: "Big-O lens",
+      text: "Ridge solve: O(d^3 + n d^2). Lasso loops: O(t n d).",
+    },
+    {
+      title: "Real use",
+      text: "Stabilizes noisy tabular models, forecasting curves, and high-dimensional features.",
+    },
+  ];
+  const visibleCards = cards.slice(0, pane.height > 560 ? 3 : 2);
+  const gap = 8;
+  const cardHeight = Math.max(48, Math.min(62, (pane.y + pane.height - cardTop - 16 - gap * (visibleCards.length - 1)) / visibleCards.length));
+  visibleCards.forEach((card, index) => {
+    const y = cardTop + index * (cardHeight + gap);
+    if (y + cardHeight > pane.y + pane.height - 8) {
+      return;
+    }
+    paintRoundedRect(context, pane.x + 14, y, pane.width - 28, cardHeight, 8, "#ffffff", index === 0 ? methodColor : "#d8e0e5");
+    context.fillStyle = index === 0 ? methodColor : "#17212b";
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(card.title, pane.x + 26, y + 17);
+    context.fillStyle = "#61707f";
+    context.font = "700 10px Inter, system-ui, sans-serif";
+    wrapCanvasText(context, card.text, pane.x + 26, y + 34, pane.width - 52, 13, 2);
+  });
+
+  context.restore();
+}
+
+function drawRegularizationWeightBar(
+  context: CanvasRenderingContext2D,
+  centerX: number,
+  width: number,
+  baseline: number,
+  valueY: number,
+  color: string,
+) {
+  const top = Math.min(baseline, valueY);
+  const height = Math.max(2, Math.abs(valueY - baseline));
+  context.fillStyle = color;
+  context.fillRect(centerX - width / 2, top, width, height);
+}
+
+function hitTestDeterminantHandle(
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  size: Size,
+  point: { x: number; y: number },
+): "basisI" | "basisJ" | null {
+  const { plotPane } = determinantLayout(size);
+  const { x, y } = determinantPlotScales(determinant, plotPane);
+  const handles = [
+    { id: "basisI" as const, point: determinant.basisI },
+    { id: "basisJ" as const, point: determinant.basisJ },
+  ];
+  const hit = handles.find((handle) => Math.hypot(point.x - x(handle.point.x), point.y - y(handle.point.y)) <= 16);
+  return hit?.id ?? null;
+}
+
+function canvasPointToDeterminantVector(
+  determinant: NonNullable<ConceptFrame["determinant"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const { plotPane } = determinantLayout(size);
+  const { plot, x, y } = determinantPlotScales(determinant, plotPane);
+  if (
+    point.x < plot.x ||
+    point.x > plot.x + plot.width ||
+    point.y < plot.y ||
+    point.y > plot.y + plot.height
+  ) {
+    return null;
+  }
+
+  return {
+    x: Math.max(-3, Math.min(3, Number(x.invert(point.x).toFixed(2)))),
+    y: Math.max(-3, Math.min(3, Number(y.invert(point.y).toFixed(2)))),
   };
 }
 

@@ -877,6 +877,492 @@ function expandDomain(min: number, max: number, pad: number): [number, number] {
   return [min - span * pad, max + span * pad];
 }
 
+const regularizationAndNoise = makeConceptAlgorithm({
+  id: "regularization-and-noise",
+  name: "Regularization and Noise",
+  category: "Regularization and Noise",
+  summary: "Shows Ridge shrinkage and Lasso weight elimination on a noisy high-degree polynomial model.",
+  parameters: [
+    {
+      kind: "range",
+      id: "regularizationAlpha",
+      label: "Regularization strength alpha",
+      min: 0,
+      max: 3,
+      step: 0.05,
+      defaultValue: 0.45,
+      format: "decimal",
+    },
+    {
+      kind: "toggle",
+      id: "useLasso",
+      label: "Use Lasso instead of Ridge",
+      defaultValue: false,
+    },
+    {
+      kind: "range",
+      id: "regularizationNoise",
+      label: "Noise level",
+      min: 0.05,
+      max: 1.25,
+      step: 0.05,
+      defaultValue: 0.62,
+      format: "decimal",
+    },
+  ],
+  sample: () => makeDataset("Generated noisy polynomial sample", makeRegularizationPoints(0.62)),
+  formulas: [
+    { title: "Ridge objective", expression: "\\min_\\beta ||y-X\\beta||_2^2+\\alpha||\\beta||_2^2" },
+    { title: "Ridge closed form", expression: "\\beta=(X^TX+\\alpha I)^{-1}X^Ty" },
+    { title: "Lasso objective", expression: "\\min_\\beta ||y-X\\beta||_2^2+\\alpha||\\beta||_1" },
+  ],
+  explanation: [
+    "Regularization adds a cost for large weights, so a flexible model stops spending capacity on noise.",
+    "Ridge shrinks many weights together, producing a smoother curve while keeping all feature columns alive.",
+    "Lasso uses an L1 penalty, which can drive individual weights exactly to zero and act like automatic feature pruning.",
+  ],
+  engine: (_, params) => {
+    const alpha = numberParam(params, "regularizationAlpha", 0.45);
+    const noise = numberParam(params, "regularizationNoise", 0.62);
+    const method = Boolean(params.useLasso) ? "lasso" : "ridge";
+    const degree = 10;
+    const points = makeRegularizationPoints(noise);
+    const fit = fitRegularizedPolynomial(points, degree, alpha, method);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: Math.round(alpha * 100),
+        points,
+        series: [
+          { label: "true signal", points: fit.signalCurve, color: "#64748b", dashed: true },
+          { label: "alpha 0", points: fit.unregularizedCurve, color: "#d34a43", dashed: true },
+          { label: method === "lasso" ? "lasso fit" : "ridge fit", points: fit.regularizedCurve, color: method === "lasso" ? "#6f58c9" : "#0f766e" },
+        ],
+        regularization: {
+          method,
+          alpha,
+          noise,
+          degree,
+          points,
+          signalCurve: fit.signalCurve,
+          unregularizedCurve: fit.unregularizedCurve,
+          regularizedCurve: fit.regularizedCurve,
+          weights: fit.weights,
+          mse: fit.mse,
+          unregularizedMse: fit.unregularizedMse,
+          activeWeights: fit.activeWeights,
+          xDomain: fit.xDomain,
+          yDomain: fit.yDomain,
+        },
+        summary: `${method === "lasso" ? "Lasso" : "Ridge"} alpha ${alpha.toFixed(2)} · active weights ${fit.activeWeights}/${degree + 1}`,
+      },
+      [
+        { label: "Method", value: method === "lasso" ? "Lasso" : "Ridge" },
+        { label: "Alpha", value: alpha.toFixed(2) },
+        { label: "Active weights", value: `${fit.activeWeights}/${degree + 1}` },
+        { label: "MSE", value: fit.mse.toFixed(3) },
+      ],
+    );
+  },
+  python: (params) => {
+    const alpha = numberParam(params, "regularizationAlpha", 0.45).toFixed(2);
+    const useLasso = Boolean(params.useLasso);
+
+    return `import numpy as np
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import ${useLasso ? "Lasso" : "Ridge"}
+
+alpha = ${alpha}
+degree = 10
+model = make_pipeline(
+    PolynomialFeatures(degree=degree, include_bias=True),
+    ${useLasso ? "Lasso" : "Ridge"}(alpha=alpha),
+)
+model.fit(X.reshape(-1, 1), y)
+
+# Manual Ridge version:
+Phi = X[:, None] ** np.arange(degree + 1)[None, :]
+penalty = alpha * np.eye(Phi.shape[1])
+penalty[0, 0] = 0  # do not penalize intercept
+beta = np.linalg.inv(Phi.T @ Phi + penalty) @ Phi.T @ y`;
+  },
+  javascript: (params) => {
+    const alpha = numberParam(params, "regularizationAlpha", 0.45).toFixed(2);
+    const useLasso = Boolean(params.useLasso);
+
+    return `const alpha = ${alpha};
+const degree = 10;
+const Phi = points.map((point) => polynomialFeatures(point.x / 3, degree));
+const y = points.map((point) => point.y);
+
+${useLasso ? `// Lasso via coordinate descent with soft-thresholding.
+let beta = Array(degree + 1).fill(0);
+for (let sweep = 0; sweep < 260; sweep += 1) {
+  for (let j = 0; j < beta.length; j += 1) {
+    let rho = 0;
+    let z = 0;
+    for (let i = 0; i < Phi.length; i += 1) {
+      const residual = y[i] - Phi[i].reduce((sum, xij, k) => sum + (k === j ? 0 : xij * beta[k]), 0);
+      rho += Phi[i][j] * residual;
+      z += Phi[i][j] ** 2;
+    }
+    beta[j] = j === 0 ? rho / z : softThreshold(rho, alpha) / z;
+  }
+}` : `// Ridge via matrix penalty addition.
+const gram = matMul(transpose(Phi), Phi);
+for (let j = 1; j < gram.length; j += 1) {
+  gram[j][j] += alpha;
+}
+const beta = solveLinearSystem(gram, matVecMul(transpose(Phi), y));`}
+
+function softThreshold(value, lambda) {
+  return Math.sign(value) * Math.max(0, Math.abs(value) - lambda);
+}`;
+  },
+});
+
+function makeRegularizationPoints(noise: number) {
+  return Array.from({ length: 28 }, (_, index) => {
+    const x = -3 + (index / 27) * 6;
+    const signal = regularizationSignal(x);
+    const deterministicNoise =
+      noise * (Math.sin(index * 2.31) * 0.42 + Math.cos(index * 0.97) * 0.3 + Math.sin(index * 4.7) * 0.12);
+    return {
+      x: round(x),
+      y: round(signal + deterministicNoise),
+      label: "noisy",
+    };
+  });
+}
+
+function regularizationSignal(x: number) {
+  return 0.62 * Math.sin(1.35 * x) + 0.2 * x + 0.22 * Math.cos(0.55 * x);
+}
+
+function fitRegularizedPolynomial(
+  points: DataPoint[],
+  degree: number,
+  alpha: number,
+  method: "ridge" | "lasso",
+) {
+  const normalizedDesign = points.map((point) => polynomialFeatureVector(point.x / 3, degree));
+  const yValues = points.map((point) => point.y);
+  const unregularized = solveRidgeWeights(normalizedDesign, yValues, 0);
+  const regularized =
+    method === "lasso"
+      ? solveLassoWeights(normalizedDesign, yValues, alpha)
+      : solveRidgeWeights(normalizedDesign, yValues, alpha * points.length * 0.18);
+  const xValues = points.map((point) => point.x);
+  const yRaw = points.map((point) => point.y);
+  const xDomain = expandDomain(Math.min(...xValues), Math.max(...xValues), 0.2);
+  const sampleCount = 190;
+  const makeCurve = (weights: number[], label: string) =>
+    Array.from({ length: sampleCount }, (_, index) => {
+      const x = xDomain[0] + (index / (sampleCount - 1)) * (xDomain[1] - xDomain[0]);
+      return {
+        x,
+        y: evaluatePolynomial(weights, x / 3),
+        label,
+      };
+    });
+  const signalCurve = Array.from({ length: sampleCount }, (_, index) => {
+    const x = xDomain[0] + (index / (sampleCount - 1)) * (xDomain[1] - xDomain[0]);
+    return { x, y: regularizationSignal(x), label: "signal" };
+  });
+  const unregularizedCurve = makeCurve(unregularized, "unregularized");
+  const regularizedCurve = makeCurve(regularized, "regularized");
+  const predictions = normalizedDesign.map((row) =>
+    row.reduce((sum, value, index) => sum + value * (regularized[index] ?? 0), 0),
+  );
+  const unregularizedPredictions = normalizedDesign.map((row) =>
+    row.reduce((sum, value, index) => sum + value * (unregularized[index] ?? 0), 0),
+  );
+  const mse = average(predictions.map((prediction, index) => (prediction - yValues[index]) ** 2));
+  const unregularizedMse = average(unregularizedPredictions.map((prediction, index) => (prediction - yValues[index]) ** 2));
+  const allY = [
+    ...yRaw,
+    ...signalCurve.map((point) => point.y),
+    ...unregularizedCurve.map((point) => point.y),
+    ...regularizedCurve.map((point) => point.y),
+  ].filter(Number.isFinite);
+  const yDomain = expandDomain(Math.max(-4, Math.min(...allY)), Math.min(4, Math.max(...allY)), 0.12);
+  const weights = regularized.map((value, index) => ({
+    label: `β${index}`,
+    value,
+    unregularizedValue: unregularized[index] ?? 0,
+    eliminated: method === "lasso" && index > 0 && Math.abs(value) < 0.015,
+  }));
+
+  return {
+    signalCurve,
+    unregularizedCurve,
+    regularizedCurve,
+    weights,
+    mse,
+    unregularizedMse,
+    activeWeights: weights.filter((weight) => !weight.eliminated && Math.abs(weight.value) >= 0.015).length,
+    xDomain,
+    yDomain,
+  };
+}
+
+function solveRidgeWeights(design: number[][], yValues: number[], lambda: number) {
+  const gram = multiplyMatrices(transposeMatrix(design), design);
+  const target = multiplyMatrixByColumn(transposeMatrix(design), yValues);
+  const penalties = Array.from({ length: gram.length }, (_, index) => (index === 0 ? 0 : lambda));
+  return solveSystemWithPenalties(gram, target, penalties);
+}
+
+function solveLassoWeights(design: number[][], yValues: number[], alpha: number) {
+  const featureCount = design[0]?.length ?? 0;
+  const weights = Array.from({ length: featureCount }, () => 0);
+  const lambda = alpha * design.length * 0.08;
+
+  for (let sweep = 0; sweep < 280; sweep += 1) {
+    for (let feature = 0; feature < featureCount; feature += 1) {
+      let rho = 0;
+      let z = 0;
+      for (let row = 0; row < design.length; row += 1) {
+        const predictedWithoutFeature = design[row].reduce(
+          (sum, value, index) => sum + (index === feature ? 0 : value * weights[index]),
+          0,
+        );
+        const residual = yValues[row] - predictedWithoutFeature;
+        rho += design[row][feature] * residual;
+        z += design[row][feature] ** 2;
+      }
+      weights[feature] = feature === 0 ? rho / Math.max(1e-8, z) : softThreshold(rho, lambda) / Math.max(1e-8, z);
+    }
+  }
+
+  return weights;
+}
+
+function softThreshold(value: number, lambda: number) {
+  return Math.sign(value) * Math.max(0, Math.abs(value) - lambda);
+}
+
+function solveSystemWithPenalties(matrix: number[][], target: number[], penalties: number[]) {
+  const size = matrix.length;
+  const augmented = matrix.map((row, rowIndex) => [
+    ...row.map((value, columnIndex) => value + (rowIndex === columnIndex ? penalties[rowIndex] ?? 0 : 0)),
+    target[rowIndex] ?? 0,
+  ]);
+
+  for (let pivot = 0; pivot < size; pivot += 1) {
+    let bestRow = pivot;
+    for (let row = pivot + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][pivot]) > Math.abs(augmented[bestRow][pivot])) {
+        bestRow = row;
+      }
+    }
+    [augmented[pivot], augmented[bestRow]] = [augmented[bestRow], augmented[pivot]];
+    const divisor = Math.abs(augmented[pivot][pivot]) < 1e-12 ? 1e-12 : augmented[pivot][pivot];
+    for (let column = pivot; column <= size; column += 1) {
+      augmented[pivot][column] /= divisor;
+    }
+    for (let row = 0; row < size; row += 1) {
+      if (row === pivot) {
+        continue;
+      }
+      const factor = augmented[row][pivot];
+      for (let column = pivot; column <= size; column += 1) {
+        augmented[row][column] -= factor * augmented[pivot][column];
+      }
+    }
+  }
+
+  return augmented.map((row) => (Number.isFinite(row[size]) ? row[size] : 0));
+}
+
+const determinantVisualizer = makeConceptAlgorithm({
+  id: "determinant-visualizer",
+  name: "Determinant Visualizer",
+  category: "Determinants & Linear Transformations",
+  summary: "Shows how a 2x2 matrix scales area, flips orientation, warps the grid, and relates det to eigenvalues.",
+  parameters: [
+    { kind: "range", id: "matrixA", label: "a: x of basis i", min: -3, max: 3, step: 0.05, defaultValue: 1.4, format: "decimal" },
+    { kind: "range", id: "matrixB", label: "b: x of basis j", min: -3, max: 3, step: 0.05, defaultValue: 0.45, format: "decimal" },
+    { kind: "range", id: "matrixC", label: "c: y of basis i", min: -3, max: 3, step: 0.05, defaultValue: 0.35, format: "decimal" },
+    { kind: "range", id: "matrixD", label: "d: y of basis j", min: -3, max: 3, step: 0.05, defaultValue: 1.2, format: "decimal" },
+  ],
+  sample: () =>
+    makeDataset("Generated determinant basis sample", [
+      { x: 0, y: 0, label: "origin" },
+      { x: 1, y: 0, label: "unit i" },
+      { x: 0, y: 1, label: "unit j" },
+    ]),
+  formulas: [
+    { title: "2x2 determinant", expression: "\\det(A)=ad-bc" },
+    { title: "Area scaling", expression: "\\text{area}(A\\mathcal{S})=|\\det(A)|\\text{area}(\\mathcal{S})" },
+    { title: "Eigenvalue product", expression: "\\det(A)=\\lambda_1\\lambda_2" },
+  ],
+  explanation: [
+    "The determinant is the signed area scale of a linear transformation.",
+    "Positive determinant keeps orientation, negative determinant flips orientation, and zero determinant collapses the plane onto a line.",
+    "For a 2x2 matrix, the determinant also equals the product of the eigenvalues, tying algebra to the geometry.",
+  ],
+  engine: (_, params) => {
+    const a = numberParam(params, "matrixA", 1.4);
+    const b = numberParam(params, "matrixB", 0.45);
+    const c = numberParam(params, "matrixC", 0.35);
+    const d = numberParam(params, "matrixD", 1.2);
+    const state = makeDeterminantState(a, b, c, d);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: 1,
+        points: [
+          { x: 0, y: 0, label: "origin" },
+          { ...state.basisI, label: "basis i" },
+          { ...state.basisJ, label: "basis j" },
+        ],
+        determinant: state,
+        summary: `det ${state.determinant.toFixed(3)} · area ${state.areaScale.toFixed(2)}x · ${state.orientation}`,
+      },
+      [
+        { label: "det(A)", value: state.determinant.toFixed(3) },
+        { label: "Area scale", value: `${state.areaScale.toFixed(2)}x` },
+        { label: "Orientation", value: determinantOrientationLabel(state.orientation) },
+        { label: "Trace", value: state.trace.toFixed(3) },
+      ],
+    );
+  },
+  python: (params) => {
+    const a = numberParam(params, "matrixA", 1.4).toFixed(2);
+    const b = numberParam(params, "matrixB", 0.45).toFixed(2);
+    const c = numberParam(params, "matrixC", 0.35).toFixed(2);
+    const d = numberParam(params, "matrixD", 1.2).toFixed(2);
+
+    return `import numpy as np
+
+A = np.array([[${a}, ${b}], [${c}, ${d}]])
+unit_square = np.array([[0, 0], [1, 0], [1, 1], [0, 1]])
+
+det = np.linalg.det(A)
+area_scale = abs(det)
+transformed_square = unit_square @ A.T
+
+eigenvalues, eigenvectors = np.linalg.eig(A)
+print(det, eigenvalues, eigenvectors)
+
+# det(A) equals the product of eigenvalues:
+assert np.allclose(det, np.prod(eigenvalues))`;
+  },
+  javascript: (params) => {
+    const a = numberParam(params, "matrixA", 1.4).toFixed(2);
+    const b = numberParam(params, "matrixB", 0.45).toFixed(2);
+    const c = numberParam(params, "matrixC", 0.35).toFixed(2);
+    const d = numberParam(params, "matrixD", 1.2).toFixed(2);
+
+    return `const A = [[${a}, ${b}], [${c}, ${d}]];
+const [[a, b], [c, d]] = A;
+const det = a * d - b * c;
+const trace = a + d;
+const discriminant = trace ** 2 - 4 * det;
+
+const transform = ([x, y]) => [
+  a * x + b * y,
+  c * x + d * y,
+];
+
+const unitSquare = [[0, 0], [1, 0], [1, 1], [0, 1]];
+const transformedSquare = unitSquare.map(transform);
+const areaScale = Math.abs(det);
+
+const eigenvalues = discriminant >= 0
+  ? [(trace + Math.sqrt(discriminant)) / 2, (trace - Math.sqrt(discriminant)) / 2]
+  : [
+      { real: trace / 2, imaginary: Math.sqrt(-discriminant) / 2 },
+      { real: trace / 2, imaginary: -Math.sqrt(-discriminant) / 2 },
+    ];`;
+  },
+});
+
+function makeDeterminantState(a: number, b: number, c: number, d: number) {
+  const determinant = a * d - b * c;
+  const trace = a + d;
+  const basisI = { x: a, y: c };
+  const basisJ = { x: b, y: d };
+  const unitSquare = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
+  const transformedSquare = unitSquare.map((point) => determinantTransformPoint(a, b, c, d, point.x, point.y));
+
+  return {
+    matrix: [
+      [a, b],
+      [c, d],
+    ],
+    basisI,
+    basisJ,
+    determinant,
+    trace,
+    orientation:
+      Math.abs(determinant) < 0.025 ? "zero" as const : determinant > 0 ? "positive" as const : "negative" as const,
+    areaScale: Math.abs(determinant),
+    unitSquare,
+    transformedSquare,
+    eigenvalues: determinantEigenvalues(a, b, c, d, determinant, trace),
+  };
+}
+
+function determinantTransformPoint(a: number, b: number, c: number, d: number, x: number, y: number) {
+  return {
+    x: a * x + b * y,
+    y: c * x + d * y,
+  };
+}
+
+function determinantEigenvalues(a: number, b: number, c: number, d: number, determinant: number, trace: number) {
+  const discriminant = trace ** 2 - 4 * determinant;
+  if (discriminant < 0) {
+    const imaginary = Math.sqrt(-discriminant) / 2;
+    return [
+      { label: "lambda1", real: trace / 2, imaginary, color: "#2f6fbe" },
+      { label: "lambda2", real: trace / 2, imaginary: -imaginary, color: "#d34a43" },
+    ];
+  }
+
+  const root = Math.sqrt(discriminant);
+  const lambda1 = (trace + root) / 2;
+  const lambda2 = (trace - root) / 2;
+  return [
+    { label: "lambda1", real: lambda1, imaginary: 0, vector: determinantEigenvector(a, b, c, d, lambda1), color: "#2f6fbe" },
+    { label: "lambda2", real: lambda2, imaginary: 0, vector: determinantEigenvector(a, b, c, d, lambda2), color: "#d34a43" },
+  ];
+}
+
+function determinantEigenvector(a: number, b: number, c: number, d: number, lambda: number) {
+  let x = b;
+  let y = lambda - a;
+  if (Math.hypot(x, y) < 1e-7) {
+    x = lambda - d;
+    y = c;
+  }
+  const norm = Math.max(1e-7, Math.hypot(x, y));
+  return {
+    x: x / norm,
+    y: y / norm,
+  };
+}
+
+function determinantOrientationLabel(orientation: "positive" | "negative" | "zero") {
+  if (orientation === "positive") {
+    return "Positive";
+  }
+  if (orientation === "negative") {
+    return "Negative";
+  }
+  return "Collapsed";
+}
+
 const modelEvaluation = barAlgorithm({
   id: "model-evaluation",
   name: "Metrics & Cross-Validation",
@@ -6960,6 +7446,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   biasVariance,
   ensembleMethods,
   hyperparameterTuning,
+  regularizationAndNoise,
   naiveBayes,
   anomalyDetection,
   imbalancedData,
@@ -6969,6 +7456,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   dynamicProgramming,
   singularValueDecomposition,
   nonNegativeMatrixFactorizationLesson,
+  determinantVisualizer,
   convexOptimization,
   convolutionsFromScratch,
   neuralNetwork,

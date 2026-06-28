@@ -289,6 +289,68 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Validation error, not training error, should decide the useful degree.",
     ],
   },
+  "regularization-and-noise": {
+    graphTitle: "What the regularization graph is showing",
+    graphNotes: [
+      "The red alpha-0 curve shows what a flexible polynomial does when it is allowed to chase noisy training points.",
+      "The regularized curve adds a penalty for large coefficients, so it trades a little training fit for a smoother shape.",
+      "The ledger shows the difference between Ridge and Lasso: Ridge shrinks weights together, while Lasso can drive specific columns to exactly zero.",
+    ],
+    complexity: {
+      time: "Ridge closed form is roughly O(d^3 + n d^2); coordinate-descent Lasso is O(t n d).",
+      prediction: "O(d) per x value after polynomial features are expanded.",
+      space: "O(n d) for the expanded design matrix plus O(d) for weights.",
+      plainEnglish:
+        "Regularization does not make prediction much slower; the main cost is fitting the expanded feature matrix while adding the penalty.",
+      terms: [
+        { label: "samples n", weight: 68 },
+        { label: "features d", weight: 78 },
+        { label: "lasso sweeps t", weight: 54 },
+        { label: "matrix solve d^3", weight: 62 },
+      ],
+    },
+    realWorld: [
+      "Stabilizing noisy forecasting curves, pricing models, and scientific calibration fits.",
+      "Keeping high-dimensional tabular models from leaning too hard on weak or redundant columns.",
+      "Using Lasso as a practical feature-pruning baseline before more complex feature-selection workflows.",
+    ],
+    keyDetails: [
+      "Ridge uses an L2 penalty, which prefers many small weights over a few huge ones.",
+      "Lasso uses an L1 penalty, which creates sparsity and can remove features entirely.",
+      "Alpha is a bias-variance control: too low overfits noise, too high underfits the real signal.",
+      "Scale features before regularization so one unit-heavy column does not get penalized unfairly.",
+    ],
+  },
+  "determinant-visualizer": {
+    graphTitle: "What the transformation graph is showing",
+    graphNotes: [
+      "The blue/green arrows are the matrix columns: where the original basis vectors land.",
+      "The transformed parallelogram's signed area is the determinant.",
+      "Dashed eigenvector lines are directions that stay on the same line after transformation.",
+    ],
+    complexity: {
+      time: "O(1) for a 2x2 determinant and closed-form eigenvalues.",
+      prediction: "O(1) to transform one 2D point.",
+      space: "O(1) for the matrix, determinant, and eigenvalue state.",
+      plainEnglish:
+        "For a 2x2 matrix this is tiny math: a few multiplications for det, and a quadratic formula for eigenvalues.",
+      terms: [
+        { label: "matrix entries", weight: 46 },
+        { label: "area scale", weight: 78 },
+        { label: "eigenvalues", weight: 68 },
+      ],
+    },
+    realWorld: [
+      "Detecting whether a 2D transform preserves, flips, scales, or collapses geometry.",
+      "Understanding Jacobian determinants in change-of-variables, graphics, robotics, and simulations.",
+      "Building intuition for why zero determinants mean information is lost.",
+    ],
+    keyDetails: [
+      "The determinant is signed: negative means the orientation flipped, not that area became negative.",
+      "A determinant near zero means the plane is nearly collapsed, which makes inverse computations unstable.",
+      "For any square matrix, the determinant equals the product of eigenvalues, counting complex eigenvalues too.",
+    ],
+  },
   "building-tokenizer": {
     graphTitle: "What the tokenizer graph is showing",
     graphNotes: [

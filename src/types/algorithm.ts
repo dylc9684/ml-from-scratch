@@ -10,6 +10,7 @@ export const algorithmCategories = [
   "Bias, Variance & the Learning Curve",
   "Ensemble Methods: Boosting, Bagging, Stacking",
   "Hyperparameter Tuning",
+  "Regularization and Noise",
   "Naive Bayes",
   "Anomaly Detection",
   "Handling Imbalanced Data",
@@ -19,6 +20,7 @@ export const algorithmCategories = [
   "Dynamic Programming",
   "Singular Value Decomposition",
   "Non-negative Matrix Factorization",
+  "Determinants & Linear Transformations",
   "Convex Optimization",
   "Convolutions from Scratch",
   "Neural Networks",
@@ -610,6 +612,55 @@ export type PolynomialState = {
   yDomain: [number, number];
 };
 
+export type DeterminantOrientation = "positive" | "negative" | "zero";
+
+export type DeterminantEigenvalue = {
+  label: string;
+  real: number;
+  imaginary: number;
+  vector?: DataPoint;
+  color: string;
+};
+
+export type DeterminantState = {
+  matrix: MatrixParameterValue;
+  basisI: DataPoint;
+  basisJ: DataPoint;
+  determinant: number;
+  trace: number;
+  orientation: DeterminantOrientation;
+  areaScale: number;
+  unitSquare: DataPoint[];
+  transformedSquare: DataPoint[];
+  eigenvalues: DeterminantEigenvalue[];
+};
+
+export type RegularizationMethod = "ridge" | "lasso";
+
+export type RegularizationWeight = {
+  label: string;
+  value: number;
+  unregularizedValue: number;
+  eliminated: boolean;
+};
+
+export type RegularizationState = {
+  method: RegularizationMethod;
+  alpha: number;
+  noise: number;
+  degree: number;
+  points: DataPoint[];
+  signalCurve: DataPoint[];
+  unregularizedCurve: DataPoint[];
+  regularizedCurve: DataPoint[];
+  weights: RegularizationWeight[];
+  mse: number;
+  unregularizedMse: number;
+  activeWeights: number;
+  xDomain: [number, number];
+  yDomain: [number, number];
+};
+
 export type ConvexOptimizerKey = "projected-gradient" | "newton";
 
 export type ConvexStatus = "convex" | "non-convex";
@@ -762,6 +813,8 @@ export type ConceptFrame = {
   svd?: SvdState;
   nmf?: NmfState;
   polynomial?: PolynomialState;
+  determinant?: DeterminantState;
+  regularization?: RegularizationState;
   convex?: ConvexState;
   convolution?: ConvolutionState;
   dynamicProgramming?: DynamicProgrammingState;
