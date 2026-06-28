@@ -644,6 +644,12 @@ export type AlgorithmEngine = (
   params: ParameterState,
 ) => EngineResult;
 
+export type AlgorithmRunController = {
+  primaryActionLabel?: string;
+  prepareRunParams?: (params: ParameterState) => ParameterState;
+  shouldAutoPlay?: (result: EngineResult) => boolean;
+};
+
 export type AlgorithmDefinition = {
   id: string;
   name: string;
@@ -652,6 +658,7 @@ export type AlgorithmDefinition = {
   parameters: ParameterDefinition[];
   makeSampleDataset: () => NormalizedDataset;
   engine: AlgorithmEngine;
+  controller?: AlgorithmRunController;
   formulas: FormulaBlock[];
   explanation: string[];
   code: {

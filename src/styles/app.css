@@ -1042,6 +1042,42 @@ select {
   margin-bottom: 5px;
 }
 
+.dataset-issues {
+  display: grid;
+  gap: 8px;
+}
+
+.dataset-issue {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.dataset-issue strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.dataset-issue span {
+  color: var(--muted);
+  line-height: 1.42;
+  font-size: 0.82rem;
+}
+
+.dataset-issue.error {
+  border-color: rgba(211, 74, 67, 0.42);
+  background: #fff7f6;
+}
+
+.dataset-issue.warning {
+  border-color: rgba(183, 121, 31, 0.38);
+  background: #fffaf0;
+}
+
 .mapping-controls {
   display: grid;
   gap: 12px;

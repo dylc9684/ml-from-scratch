@@ -1,3 +1,4 @@
+import { csvParseRows } from "d3";
 import type {
   DataPoint,
   DatasetColumn,
@@ -5,6 +6,29 @@ import type {
   NormalizedDataset,
   RawDataset,
 } from "../types/algorithm";
+
+export type DatasetIssue = {
+  severity: "error" | "warning";
+  message: string;
+  row?: number;
+  column?: string;
+};
+
+export type DatasetParseResult =
+  | {
+      ok: true;
+      dataset: RawDataset;
+      issues: DatasetIssue[];
+    }
+  | {
+      ok: false;
+      issues: DatasetIssue[];
+    };
+
+export type DatasetNormalizationResult = {
+  dataset: NormalizedDataset;
+  issues: DatasetIssue[];
+};
 
 const round = (value: number, digits = 3) =>
   Number.parseFloat(value.toFixed(digits));
@@ -60,7 +84,11 @@ function makeSample(name: string, points: DataPoint[]): NormalizedDataset {
   };
 }
 
-export function parseDatasetFile(fileName: string, text: string): RawDataset {
+export function parseDatasetFile(fileName: string, text: string): DatasetParseResult {
+  if (text.trim().length === 0) {
+    return fail("The uploaded file is empty.");
+  }
+
   if (fileName.toLowerCase().endsWith(".json")) {
     return parseJsonDataset(fileName, text);
   }
@@ -68,68 +96,90 @@ export function parseDatasetFile(fileName: string, text: string): RawDataset {
   return parseCsvDataset(fileName, text);
 }
 
-function parseJsonDataset(fileName: string, text: string): RawDataset {
-  const parsed = JSON.parse(text) as unknown;
+function parseJsonDataset(fileName: string, text: string): DatasetParseResult {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(stripBom(text));
+  } catch (error) {
+    return fail(`JSON could not be parsed: ${error instanceof Error ? error.message : "invalid syntax"}.`);
+  }
+
   const rows = Array.isArray(parsed)
     ? parsed
     : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { rows?: unknown }).rows)
       ? (parsed as { rows: unknown[] }).rows
-      : [];
+      : null;
+
+  if (!rows) {
+    return fail("JSON uploads must be an array of objects or an object with a rows array.");
+  }
 
   const objectRows = rows.filter(isRecord);
-  return {
+  if (objectRows.length === 0) {
+    return fail("JSON upload did not contain any object rows.");
+  }
+
+  const issues: DatasetIssue[] = [];
+  if (objectRows.length !== rows.length) {
+    issues.push({
+      severity: "warning",
+      message: `${rows.length - objectRows.length} JSON row(s) were skipped because they were not objects.`,
+    });
+  }
+
+  return ok({
     name: fileName,
     rows: objectRows,
     columns: inferColumns(objectRows),
-  };
+  }, issues);
 }
 
-function parseCsvDataset(fileName: string, text: string): RawDataset {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+function parseCsvDataset(fileName: string, text: string): DatasetParseResult {
+  let records: string[][];
 
-  const headers = splitCsvLine(lines[0] ?? "");
-  const rows = lines.slice(1).map((line) => {
-    const values = splitCsvLine(line);
-    return headers.reduce<Record<string, unknown>>((row, header, index) => {
-      row[header] = coerceValue(values[index] ?? "");
+  try {
+    records = csvParseRows(stripBom(text));
+  } catch (error) {
+    return fail(`CSV could not be parsed: ${error instanceof Error ? error.message : "invalid syntax"}.`);
+  }
+
+  const nonEmptyRecords = records.filter((row) =>
+    row.some((cell) => cell.trim().length > 0),
+  );
+
+  if (nonEmptyRecords.length < 2) {
+    return fail("CSV uploads need a header row and at least one data row.");
+  }
+
+  const headers = nonEmptyRecords[0].map((header) => header.trim());
+  const headerIssue = validateHeaders(headers);
+  if (headerIssue) {
+    return fail(headerIssue);
+  }
+
+  const issues: DatasetIssue[] = [];
+  const rows = nonEmptyRecords.slice(1).map((values, index) => {
+    const rowNumber = index + 2;
+    if (values.length !== headers.length) {
+      issues.push({
+        severity: "warning",
+        row: rowNumber,
+        message: `Row ${rowNumber} has ${values.length} cell(s); expected ${headers.length}. Missing cells were filled as blank and extra cells were ignored.`,
+      });
+    }
+
+    return headers.reduce<Record<string, unknown>>((row, header, columnIndex) => {
+      row[header] = coerceValue(values[columnIndex]?.trim() ?? "");
       return row;
     }, {});
   });
 
-  return {
+  return ok({
     name: fileName,
     rows,
     columns: inferColumns(rows),
-  };
-}
-
-function splitCsvLine(line: string): string[] {
-  const cells: string[] = [];
-  let current = "";
-  let quoted = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (char === "\"" && next === "\"") {
-      current += "\"";
-      index += 1;
-    } else if (char === "\"") {
-      quoted = !quoted;
-    } else if (char === "," && !quoted) {
-      cells.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  cells.push(current.trim());
-  return cells;
+  }, issues);
 }
 
 function coerceValue(value: string): unknown {
@@ -145,7 +195,7 @@ function inferColumns(rows: Record<string, unknown>[]): DatasetColumn[] {
   const names = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   return names.map((name) => ({
     name,
-    type: rows.some((row) => typeof row[name] === "number") ? "number" : "string",
+    type: isMostlyNumeric(rows.map((row) => row[name])) ? "number" : "string",
   }));
 }
 
@@ -163,15 +213,64 @@ export function initialMapping(raw: RawDataset): DatasetMapping {
 export function normalizeDataset(
   raw: RawDataset,
   mapping: DatasetMapping,
-): NormalizedDataset {
-  const points = raw.rows
-    .map((row) => ({
+): DatasetNormalizationResult {
+  const issues: DatasetIssue[] = [];
+
+  if (!mapping.x || !mapping.y) {
+    return {
+      dataset: makeUploadedDataset(raw, [], mapping),
+      issues: [
+        {
+          severity: "error",
+          message: "Choose numeric X and Y feature columns before running the algorithm.",
+        },
+      ],
+    };
+  }
+
+  const points: DataPoint[] = [];
+  const rejectedRows: number[] = [];
+
+  raw.rows.forEach((row, index) => {
+    const point = {
       x: Number(row[mapping.x]),
       y: Number(row[mapping.y]),
       label: mapping.label ? (row[mapping.label] as string | number | undefined) : undefined,
-    }))
-    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    };
 
+    if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      points.push(point);
+    } else {
+      rejectedRows.push(index + 1);
+    }
+  });
+
+  if (rejectedRows.length > 0) {
+    issues.push({
+      severity: "warning",
+      message: `${rejectedRows.length} row(s) were skipped because the mapped X/Y values were not numeric.`,
+      row: rejectedRows[0],
+    });
+  }
+
+  if (points.length === 0) {
+    issues.push({
+      severity: "error",
+      message: "No usable rows remain after feature mapping. Select different numeric columns or upload cleaner data.",
+    });
+  }
+
+  return {
+    dataset: makeUploadedDataset(raw, points, mapping),
+    issues,
+  };
+}
+
+function makeUploadedDataset(
+  raw: RawDataset,
+  points: DataPoint[],
+  mapping: DatasetMapping,
+): NormalizedDataset {
   return {
     name: raw.name,
     points,
@@ -179,6 +278,53 @@ export function normalizeDataset(
     mapping,
     source: "upload",
   };
+}
+
+function stripBom(text: string) {
+  return text.replace(/^\uFEFF/, "");
+}
+
+function ok(dataset: RawDataset, issues: DatasetIssue[] = []): DatasetParseResult {
+  return {
+    ok: true,
+    dataset,
+    issues,
+  };
+}
+
+function fail(message: string): DatasetParseResult {
+  return {
+    ok: false,
+    issues: [{ severity: "error", message }],
+  };
+}
+
+function validateHeaders(headers: string[]) {
+  if (headers.length === 0 || headers.every((header) => header.length === 0)) {
+    return "CSV header row is empty.";
+  }
+
+  const blankIndex = headers.findIndex((header) => header.length === 0);
+  if (blankIndex >= 0) {
+    return `CSV header ${blankIndex + 1} is blank.`;
+  }
+
+  const seen = new Set<string>();
+  const duplicate = headers.find((header) => {
+    const key = header.toLowerCase();
+    if (seen.has(key)) {
+      return true;
+    }
+    seen.add(key);
+    return false;
+  });
+
+  return duplicate ? `CSV header "${duplicate}" is duplicated.` : null;
+}
+
+function isMostlyNumeric(values: unknown[]) {
+  const filled = values.filter((value) => value !== "");
+  return filled.length > 0 && filled.every((value) => typeof value === "number");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

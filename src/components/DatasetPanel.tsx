@@ -4,10 +4,12 @@ import type {
   NormalizedDataset,
   RawDataset,
 } from "../types/algorithm";
+import type { DatasetIssue } from "../data/datasets";
 
 type Props = {
   rawDataset: RawDataset | null;
   dataset: NormalizedDataset;
+  issues: DatasetIssue[];
   mapping: DatasetMapping;
   onMappingChange: (mapping: DatasetMapping) => void;
   onUploadClick: () => void;
@@ -17,6 +19,7 @@ type Props = {
 export function DatasetPanel({
   rawDataset,
   dataset,
+  issues,
   mapping,
   onMappingChange,
   onUploadClick,
@@ -52,6 +55,27 @@ export function DatasetPanel({
         </div>
         <strong>{dataset.points.length} usable rows</strong>
       </div>
+
+      {issues.length > 0 && (
+        <div className="dataset-issues" role="status" aria-live="polite">
+          {issues.slice(0, 5).map((issue, index) => (
+            <div className={`dataset-issue ${issue.severity}`} key={`${issue.message}-${index}`}>
+              <strong>{issue.severity === "error" ? "Error" : "Warning"}</strong>
+              <span>
+                {issue.message}
+                {issue.row ? ` Row ${issue.row}.` : ""}
+                {issue.column ? ` Column ${issue.column}.` : ""}
+              </span>
+            </div>
+          ))}
+          {issues.length > 5 && (
+            <div className="dataset-issue warning">
+              <strong>More</strong>
+              <span>{issues.length - 5} additional dataset issue(s).</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {rawDataset ? (
         <div className="mapping-controls">

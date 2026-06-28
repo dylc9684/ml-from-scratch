@@ -1,13 +1,7 @@
-import { categoryDemos } from "./categoryDemos";
-import { kMeans } from "./kMeans";
-import { linearRegression } from "./linearRegression";
+import { lessonModules, lessonModuleToAlgorithm } from "../lessons";
 import type { AlgorithmDefinition, GridWorldValue, ParameterState } from "../types/algorithm";
 
-export const algorithms: AlgorithmDefinition[] = [
-  linearRegression,
-  ...categoryDemos,
-  kMeans,
-];
+export const algorithms: AlgorithmDefinition[] = lessonModules.map(lessonModuleToAlgorithm);
 
 export function makeDefaultParams(algorithm: AlgorithmDefinition): ParameterState {
   return algorithm.parameters.reduce<ParameterState>((state, parameter) => {

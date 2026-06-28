@@ -26,3 +26,4 @@ pnpm-debug.log*
 # TypeScript and tooling cache
 *.tsbuildinfo
 node_modules/.tmp/
+node_modules

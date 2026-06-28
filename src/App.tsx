@@ -7,7 +7,12 @@ import {
   Upload,
 } from "lucide-react";
 import { algorithms, makeDefaultParams } from "./algorithms";
-import { initialMapping, normalizeDataset, parseDatasetFile } from "./data/datasets";
+import {
+  initialMapping,
+  normalizeDataset,
+  parseDatasetFile,
+  type DatasetIssue,
+} from "./data/datasets";
 import { AlgorithmCatalog } from "./components/AlgorithmCatalog";
 import { CodeViewer } from "./components/CodeViewer";
 import { DatasetPanel } from "./components/DatasetPanel";
@@ -40,6 +45,7 @@ export default function App() {
   );
   const [activePanel, setActivePanel] = useState<Panel>("controls");
   const [rawDataset, setRawDataset] = useState<RawDataset | null>(null);
+  const [uploadIssues, setUploadIssues] = useState<DatasetIssue[]>([]);
   const [mapping, setMapping] = useState<DatasetMapping>(() => ({
     x: "x",
     y: "y",
@@ -53,13 +59,41 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const dataset: NormalizedDataset = useMemo(() => {
+  const normalizedDataset = useMemo(() => {
     if (!rawDataset) {
-      return activeAlgorithm.makeSampleDataset();
+      return {
+        dataset: activeAlgorithm.makeSampleDataset(),
+        issues: uploadIssues,
+      };
     }
 
-    return normalizeDataset(rawDataset, mapping);
-  }, [activeAlgorithm, mapping, rawDataset]);
+    const result = normalizeDataset(rawDataset, mapping);
+    return {
+      dataset: result.dataset,
+      issues: [
+        ...uploadIssues,
+        ...result.issues,
+        ...(result.dataset.points.length === 0
+          ? [
+              {
+                severity: "warning" as const,
+                message: "The visualization is using the generated sample until the upload has usable X/Y rows.",
+              },
+            ]
+          : []),
+      ],
+    };
+  }, [activeAlgorithm, mapping, rawDataset, uploadIssues]);
+
+  const displayDataset: NormalizedDataset = normalizedDataset.dataset;
+  const engineDataset: NormalizedDataset = useMemo(
+    () =>
+      displayDataset.points.length > 0
+        ? displayDataset
+        : activeAlgorithm.makeSampleDataset(),
+    [activeAlgorithm, displayDataset],
+  );
+  const datasetIssues = normalizedDataset.issues;
 
   useEffect(() => {
     setParams(makeDefaultParams(activeAlgorithm));
@@ -68,20 +102,20 @@ export default function App() {
   }, [activeAlgorithm]);
 
   const runAlgorithm = useCallback(() => {
-    const result = activeAlgorithm.engine(dataset, params);
+    const result = activeAlgorithm.engine(engineDataset, params);
     setEngineResult(result);
     setFrameIndex(0);
-    setIsPlaying(result.frames.length > 1);
-  }, [activeAlgorithm, dataset, params]);
+    setIsPlaying(activeAlgorithm.controller?.shouldAutoPlay?.(result) ?? result.frames.length > 1);
+  }, [activeAlgorithm, engineDataset, params]);
 
   const runWithParams = useCallback(
     (nextParams: ParameterState) => {
-      const result = activeAlgorithm.engine(dataset, nextParams);
+      const result = activeAlgorithm.engine(engineDataset, nextParams);
       setEngineResult(result);
       setFrameIndex(0);
-      setIsPlaying(result.frames.length > 1);
+      setIsPlaying(activeAlgorithm.controller?.shouldAutoPlay?.(result) ?? result.frames.length > 1);
     },
-    [activeAlgorithm, dataset],
+    [activeAlgorithm, engineDataset],
   );
 
   useEffect(() => {
@@ -126,11 +160,9 @@ export default function App() {
   };
 
   const handleRunClick = () => {
-    if (activeAlgorithm.id === "dynamic-programming") {
-      const nextParams = {
-        ...params,
-        playSignal: Number(params.dpStep ?? 0) + 1,
-      };
+    const nextParams = activeAlgorithm.controller?.prepareRunParams?.(params) ?? params;
+
+    if (nextParams !== params) {
       setParams(nextParams);
       runWithParams(nextParams);
       return;
@@ -143,13 +175,14 @@ export default function App() {
     const nextParams = makeDefaultParams(activeAlgorithm);
     setParams(nextParams);
     setFrameIndex(0);
-    const result = activeAlgorithm.engine(dataset, nextParams);
+    const result = activeAlgorithm.engine(engineDataset, nextParams);
     setEngineResult(result);
-    setIsPlaying(result.frames.length > 1);
+    setIsPlaying(activeAlgorithm.controller?.shouldAutoPlay?.(result) ?? result.frames.length > 1);
   };
 
   const handleUseSample = () => {
     setRawDataset(null);
+    setUploadIssues([]);
     setMapping({ x: "x", y: "y", label: "label" });
     setActivePanel("data");
   };
@@ -159,10 +192,33 @@ export default function App() {
       return;
     }
 
-    const text = await file.text();
+    let text = "";
+
+    try {
+      text = await file.text();
+    } catch {
+      setUploadIssues([
+        {
+          severity: "error",
+          message: "The browser could not read that file. Try exporting it again as CSV or JSON.",
+        },
+      ]);
+      setRawDataset(null);
+      setActivePanel("data");
+      return;
+    }
+
     const parsed = parseDatasetFile(file.name, text);
-    setRawDataset(parsed);
-    setMapping(initialMapping(parsed));
+
+    setUploadIssues(parsed.issues);
+    if (!parsed.ok) {
+      setRawDataset(null);
+      setActivePanel("data");
+      return;
+    }
+
+    setRawDataset(parsed.dataset);
+    setMapping(initialMapping(parsed.dataset));
     setActivePanel("data");
   };
 
@@ -218,7 +274,7 @@ export default function App() {
           </button>
           <button className="button primary" type="button" onClick={handleRunClick}>
             <Play size={17} aria-hidden="true" />
-            {activeAlgorithm.id === "dynamic-programming" ? "Play" : "Run"}
+            {activeAlgorithm.controller?.primaryActionLabel ?? "Run"}
           </button>
           <button
             className="icon-button"
@@ -249,7 +305,7 @@ export default function App() {
             </div>
             <div className="status-pills" aria-live="polite">
               <span className="pill">{engineResult.runtime}</span>
-              <span className="pill">{dataset.points.length} points</span>
+              <span className="pill">{engineDataset.points.length} points</span>
               <span className="pill">
                 Frame {Math.min(frameIndex + 1, engineResult.frames.length)} /{" "}
                 {engineResult.frames.length || 1}
@@ -300,7 +356,8 @@ export default function App() {
             {activePanel === "data" && (
               <DatasetPanel
                 rawDataset={rawDataset}
-                dataset={dataset}
+                dataset={displayDataset}
+                issues={datasetIssues}
                 mapping={mapping}
                 onMappingChange={setMapping}
                 onUploadClick={() => fileInputRef.current?.click()}

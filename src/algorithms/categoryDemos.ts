@@ -27,6 +27,10 @@ import type {
   ParameterState,
   FrameworkLayerState,
 } from "../types/algorithm";
+import {
+  dynamicProgrammingContent,
+  dynamicProgrammingController,
+} from "../lessons/dynamicProgramming";
 
 const colors = ["#0f766e", "#2f6fbe", "#b7791f", "#d34a43", "#6f58c9", "#258f66"];
 
@@ -1407,16 +1411,9 @@ const dynamicProgramming = makeConceptAlgorithm({
     },
   ],
   sample: makeDynamicProgrammingDataset,
-  formulas: [
-    { title: "Bellman optimality", expression: "V_{k+1}(s)=\\max_a\\sum_{s'}P(s'\\mid s,a)[R(s,a,s')+\\gamma V_k(s')]" },
-    { title: "Policy evaluation", expression: "V^{\\pi}_{k+1}(s)=\\sum_{s'}P(s'\\mid s,\\pi(s))[R(s,\\pi(s),s')+\\gamma V^{\\pi}_k(s')]" },
-    { title: "Policy extraction", expression: "\\pi^*(s)=\\arg\\max_a\\sum_{s'}P(s'\\mid s,a)[R(s,a,s')+\\gamma V(s')]" },
-  ],
-  explanation: [
-    "Dynamic programming solves a known Markov decision process by repeatedly applying Bellman updates to a value matrix.",
-    "In Gridworld, each coordinate is a state. Walls block movement, fire pits are negative terminal rewards, and gold chests are positive terminal rewards.",
-    "As sweeps accumulate, reward information propagates outward through the grid; once the values stabilize, the best neighboring action becomes the optimal policy arrow.",
-  ],
+  formulas: dynamicProgrammingContent.formulas,
+  explanation: dynamicProgrammingContent.explanation,
+  controller: dynamicProgrammingController,
   engine: (_, params) => {
     const grid = gridWorldParam(params, "gridWorld", defaultGridWorld);
     const gamma = Math.max(0.5, Math.min(0.98, numberParam(params, "discount", 0.9)));
@@ -5482,6 +5479,7 @@ type ConceptConfig = {
   formulas: AlgorithmDefinition["formulas"];
   explanation: string[];
   engine: (dataset: NormalizedDataset, params: ParameterState) => EngineResult;
+  controller?: AlgorithmDefinition["controller"];
   python: (params: ParameterState) => string;
   javascript: (params: ParameterState) => string;
 };
@@ -5495,6 +5493,7 @@ function makeConceptAlgorithm(config: ConceptConfig): AlgorithmDefinition {
     parameters: config.parameters,
     makeSampleDataset: config.sample,
     engine: config.engine,
+    controller: config.controller,
     formulas: config.formulas,
     explanation: config.explanation,
     code: {
