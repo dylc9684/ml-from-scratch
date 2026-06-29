@@ -97,6 +97,26 @@ function makeApplicationCards(
 }
 
 function applicationTemplates(algorithm: AlgorithmDefinition) {
+  if (algorithm.id === "hidden-markov-models") {
+    return [
+      {
+        title: "Part-of-speech tagging",
+        data: "Tokenized sentences, transition counts, and word/tag emission counts",
+        action: "Decode the most likely grammatical role for every word",
+      },
+      {
+        title: "Regime detection",
+        data: "Visible market, weather, or operations events over time",
+        action: "Infer hidden state sequences such as bull, crash, recovery, or fault states",
+      },
+      {
+        title: "Streaming diagnostics",
+        data: "Sensor readings, alarms, and state transition assumptions",
+        action: "Track likely hidden machine states as observations arrive",
+      },
+    ];
+  }
+
   if (algorithm.id === "gaussian-discriminant-analysis") {
     return [
       {

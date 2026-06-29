@@ -66,6 +66,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isConvexLesson = frame?.type === "concept-demo" && Boolean(frame.convex);
   const isConvolutionLesson = frame?.type === "concept-demo" && Boolean(frame.convolution);
   const isDynamicProgrammingLesson = frame?.type === "concept-demo" && Boolean(frame.dynamicProgramming);
+  const isHiddenMarkovLesson = frame?.type === "concept-demo" && Boolean(frame.hiddenMarkov);
   const isTokenizerLesson = frame?.type === "concept-demo" && Boolean(frame.tokenizer);
 
   useEffect(() => {
@@ -320,6 +321,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       } ${
         isDynamicProgrammingLesson ? "dynamic-programming-shell" : ""
       } ${
+        isHiddenMarkovLesson ? "hidden-markov-shell" : ""
+      } ${
         isTokenizerLesson ? "tokenizer-shell" : ""
       }`}
       aria-label={`${algorithm.name} visualization`}
@@ -457,6 +460,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.dynamicProgramming) {
     paintDynamicProgrammingLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.hiddenMarkov) {
+    paintHiddenMarkovLesson(context, frame, size);
     return;
   }
 
@@ -2179,6 +2187,327 @@ function paintGridWorldCell(grid: GridWorldValue, row: number, column: number, t
     ...grid,
     cells,
   };
+}
+
+function paintHiddenMarkovLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const hiddenMarkov = frame.hiddenMarkov;
+  if (!hiddenMarkov) {
+    return;
+  }
+
+  const layout = hiddenMarkovLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Viterbi trellis decoder", layout.trellisPane.x, layout.trellisPane.y - 24);
+  context.fillText(hiddenMarkov.mode === "pos" ? "POS tagger scorecard" : "Regime path scorecard", layout.scorePane.x, layout.scorePane.y - 24);
+
+  paintHiddenMarkovTrellis(context, hiddenMarkov, layout.trellisPane);
+  paintHiddenMarkovScorePane(context, hiddenMarkov, layout.scorePane);
+}
+
+function hiddenMarkovLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const trellisPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(380, size.height * 0.54) }
+    : { x: padding, y: 58, width: Math.max(520, size.width * 0.62), height: size.height - 96 };
+  const scorePane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: trellisPane.y + trellisPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(330, size.height - trellisPane.height - 120),
+      }
+    : {
+        x: trellisPane.x + trellisPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - trellisPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { trellisPane, scorePane };
+}
+
+function hiddenMarkovGridBox(
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  pane: CanvasPane,
+) {
+  const leftPad = 98;
+  const topPad = 86;
+  return {
+    x: pane.x + leftPad,
+    y: pane.y + topPad,
+    width: Math.max(120, pane.width - leftPad - 28),
+    height: Math.max(130, pane.height - topPad - 96),
+    columns: Math.max(1, hiddenMarkov.observations.length),
+    rows: Math.max(1, hiddenMarkov.states.length),
+  };
+}
+
+function paintHiddenMarkovTrellis(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(hiddenMarkov.mode === "pos" ? "Words become hidden grammatical states" : "Visible events reveal hidden market states", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `${hiddenMarkov.observations.length} observations · best logP ${hiddenMarkov.logProbability.toFixed(2)} · Decode replays the path`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  paintHmmObservationChips(context, hiddenMarkov, pane);
+
+  const box = hiddenMarkovGridBox(hiddenMarkov, pane);
+  const columnWidth = box.width / box.columns;
+  const rowHeight = box.height / box.rows;
+  hiddenMarkov.states.forEach((state, rowIndex) => {
+    const y = box.y + rowIndex * rowHeight + rowHeight / 2;
+    context.fillStyle = state.color;
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "right";
+    context.fillText(fitCanvasText(context, state.shortLabel, 78), box.x - 12, y + 4);
+  });
+
+  context.strokeStyle = "rgba(100, 116, 139, 0.16)";
+  context.lineWidth = 1;
+  for (let column = 0; column <= box.columns; column += 1) {
+    const x = box.x + column * columnWidth;
+    context.beginPath();
+    context.moveTo(x, box.y);
+    context.lineTo(x, box.y + box.height);
+    context.stroke();
+  }
+  hiddenMarkov.states.forEach((_, rowIndex) => {
+    const y = box.y + rowIndex * rowHeight + rowHeight / 2;
+    context.beginPath();
+    context.moveTo(box.x - 6, y);
+    context.lineTo(box.x + box.width, y);
+    context.stroke();
+  });
+
+  const cellPositions = new Map<string, { x: number; y: number }>();
+  hiddenMarkov.trellis.forEach((column, time) => {
+    column.forEach((cell, rowIndex) => {
+      cellPositions.set(`${time}:${cell.stateKey}`, {
+        x: box.x + time * columnWidth + columnWidth / 2,
+        y: box.y + rowIndex * rowHeight + rowHeight / 2,
+      });
+    });
+  });
+
+  paintHmmWinningPath(context, hiddenMarkov, cellPositions);
+
+  hiddenMarkov.trellis.forEach((column, time) => {
+    column.forEach((cell) => {
+      const position = cellPositions.get(`${time}:${cell.stateKey}`);
+      if (!position) {
+        return;
+      }
+      const state = hiddenMarkov.states.find((candidate) => candidate.key === cell.stateKey) ?? hiddenMarkov.states[0];
+      const active = cell.winning;
+      context.fillStyle = active ? "#ffffff" : "rgba(255, 255, 255, 0.78)";
+      context.strokeStyle = active ? state.color : "#d8e0e5";
+      context.lineWidth = active ? 3 : 1.2;
+      context.beginPath();
+      context.arc(position.x, position.y, active ? 16 : 13, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.fillStyle = active ? state.color : "#61707f";
+      context.font = "900 8px Inter, system-ui, sans-serif";
+      context.textAlign = "center";
+      context.fillText(state.shortLabel, position.x, position.y - 2);
+      context.fillStyle = "#61707f";
+      context.font = "800 7px ui-monospace, SFMono-Regular, Menlo, monospace";
+      context.fillText(cell.logProbability.toFixed(1), position.x, position.y + 9);
+    });
+  });
+
+  const pathText = hiddenMarkov.bestPathLabels.join(" -> ");
+  paintRoundedRect(context, pane.x + 14, pane.y + pane.height - 44, pane.width - 28, 28, 8, "#f7fafc", "#d8e0e5");
+  context.fillStyle = "#17212b";
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(fitCanvasText(context, `Decoded path: ${pathText}`, pane.width - 46), pane.x + 24, pane.y + pane.height - 26);
+
+  context.restore();
+}
+
+function paintHmmObservationChips(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  pane: CanvasPane,
+) {
+  const box = hiddenMarkovGridBox(hiddenMarkov, pane);
+  const columnWidth = box.width / box.columns;
+  hiddenMarkov.observations.forEach((observation, index) => {
+    const x = box.x + index * columnWidth + columnWidth / 2;
+    const active = index <= hiddenMarkov.phaseIndex;
+    paintRoundedRect(context, x - Math.min(48, columnWidth * 0.42), pane.y + 58, Math.min(96, columnWidth * 0.84), 22, 8, active ? "#e8f5f2" : "#ffffff", active ? "#0f766e" : "#d8e0e5");
+    context.fillStyle = active ? "#0f766e" : "#61707f";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(fitCanvasText(context, observation, Math.min(84, columnWidth * 0.74)), x, pane.y + 73);
+  });
+}
+
+function paintHmmWinningPath(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  positions: Map<string, { x: number; y: number }>,
+) {
+  context.save();
+  context.shadowBlur = 14;
+  context.shadowColor = "#0f766e";
+  for (let time = 1; time <= hiddenMarkov.phaseIndex; time += 1) {
+    const from = positions.get(`${time - 1}:${hiddenMarkov.bestPath[time - 1]}`);
+    const to = positions.get(`${time}:${hiddenMarkov.bestPath[time]}`);
+    const state = hiddenMarkov.states.find((candidate) => candidate.key === hiddenMarkov.bestPath[time]) ?? hiddenMarkov.states[0];
+    if (!from || !to) {
+      continue;
+    }
+    context.strokeStyle = state.color;
+    context.lineWidth = 4;
+    context.globalAlpha = 0.88;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+  }
+
+  const current = positions.get(`${hiddenMarkov.phaseIndex}:${hiddenMarkov.bestPath[hiddenMarkov.phaseIndex]}`);
+  if (current) {
+    context.fillStyle = "rgba(255, 255, 255, 0.86)";
+    context.strokeStyle = "#0f766e";
+    context.lineWidth = 3;
+    context.globalAlpha = 0.55 + hiddenMarkov.phaseProgress * 0.45;
+    context.beginPath();
+    context.arc(current.x, current.y, 22, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+}
+
+function paintHiddenMarkovScorePane(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(hiddenMarkov.mode === "pos" ? "Token tags" : "Accumulating log-probabilities", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, `Viterbi keeps the strongest predecessor for every state at every time step.`, pane.width - 28),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const tokenTop = pane.y + 66;
+  if (hiddenMarkov.mode === "pos") {
+    paintHmmTaggedTokens(context, hiddenMarkov, pane.x + 14, tokenTop, pane.width - 28);
+  } else {
+    paintHmmMarketSequence(context, hiddenMarkov, pane.x + 14, tokenTop, pane.width - 28);
+  }
+
+  const tableTop = tokenTop + 100;
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Winning path scorecard", pane.x + 14, tableTop);
+
+  const rowHeight = 44;
+  hiddenMarkov.scoreSteps.slice(-8).forEach((step, index) => {
+    const y = tableTop + 18 + index * rowHeight;
+    if (y + rowHeight > pane.y + pane.height - 18) {
+      return;
+    }
+    const active = step.time === hiddenMarkov.phaseIndex;
+    paintRoundedRect(context, pane.x + 14, y, pane.width - 28, rowHeight - 6, 8, active ? "#f7fafc" : "#ffffff", active ? step.color : "#d8e0e5");
+    context.fillStyle = step.color;
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(`t${step.time + 1} ${step.observation} -> ${step.stateLabel}`, pane.x + 24, y + 14);
+    context.fillStyle = "#61707f";
+    context.font = "800 8px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.fillText(
+      `trans ${step.transitionLog.toFixed(2)}  emit ${step.emissionLog.toFixed(2)}  cum ${step.cumulativeLog.toFixed(2)}`,
+      pane.x + 24,
+      y + 30,
+    );
+  });
+
+  context.restore();
+}
+
+function paintHmmTaggedTokens(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  x: number,
+  y: number,
+  width: number,
+) {
+  let cursorX = x;
+  let cursorY = y;
+  hiddenMarkov.taggedTokens.forEach((token, index) => {
+    const active = index <= hiddenMarkov.phaseIndex;
+    const chipWidth = Math.min(width, Math.max(72, context.measureText(token.text).width + 38));
+    if (cursorX + chipWidth > x + width) {
+      cursorX = x;
+      cursorY += 38;
+    }
+    paintRoundedRect(context, cursorX, cursorY, chipWidth, 30, 8, active ? `${token.color}22` : "#ffffff", active ? token.color : "#d8e0e5");
+    context.fillStyle = active ? token.color : "#61707f";
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(fitCanvasText(context, token.text, chipWidth - 14), cursorX + 7, cursorY + 13);
+    context.fillStyle = "#61707f";
+    context.font = "800 8px Inter, system-ui, sans-serif";
+    context.fillText(token.stateLabel, cursorX + 7, cursorY + 25);
+    cursorX += chipWidth + 8;
+  });
+}
+
+function paintHmmMarketSequence(
+  context: CanvasRenderingContext2D,
+  hiddenMarkov: NonNullable<ConceptFrame["hiddenMarkov"]>,
+  x: number,
+  y: number,
+  width: number,
+) {
+  const stageWidth = width / Math.max(1, hiddenMarkov.observations.length);
+  hiddenMarkov.observations.forEach((observation, index) => {
+    const state = hiddenMarkov.states.find((candidate) => candidate.key === hiddenMarkov.bestPath[index]) ?? hiddenMarkov.states[0];
+    const left = x + index * stageWidth + 3;
+    const active = index <= hiddenMarkov.phaseIndex;
+    paintRoundedRect(context, left, y, Math.max(44, stageWidth - 6), 54, 8, active ? `${state.color}18` : "#ffffff", active ? state.color : "#d8e0e5");
+    context.fillStyle = active ? state.color : "#61707f";
+    context.font = "900 10px Inter, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillText(fitCanvasText(context, observation, stageWidth - 14), left + (stageWidth - 6) / 2, y + 18);
+    context.fillStyle = "#17212b";
+    context.font = "900 8px Inter, system-ui, sans-serif";
+    context.fillText(fitCanvasText(context, state.shortLabel, stageWidth - 14), left + (stageWidth - 6) / 2, y + 38);
+  });
 }
 
 const tokenizerChipColors = ["#d9f2ee", "#e4ecff", "#fff0d8", "#f8dedc", "#eee9ff", "#dcf5e8"];

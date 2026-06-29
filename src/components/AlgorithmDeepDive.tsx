@@ -259,6 +259,37 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Posterior means useful evidence divided by all evidence, not just test accuracy.",
     ],
   },
+  "hidden-markov-models": {
+    graphTitle: "What the trellis is showing",
+    graphNotes: [
+      "Each column is one visible observation; each row is one hidden state candidate.",
+      "Viterbi stores the best previous state for every cell, then backtraces the highest-scoring final cell.",
+      "The glowing path is the single most likely hidden-state explanation for the entire sequence.",
+    ],
+    complexity: {
+      time: "O(T K^2), where T is sequence length and K is the number of hidden states.",
+      prediction: "O(T K^2) for one decoded sequence.",
+      space: "O(T K) for the trellis and backpointers.",
+      plainEnglish:
+        "Every time step compares every current state against every previous state. More hidden states are the main cost multiplier.",
+      terms: [
+        { label: "steps T", weight: 72 },
+        { label: "states K", weight: 84 },
+        { label: "trellis T*K", weight: 70 },
+      ],
+    },
+    realWorld: [
+      "Early part-of-speech tagging and speech recognition before neural sequence models became dominant.",
+      "Market-regime and weather-state decoding from visible observations.",
+      "Fault detection in sensors where the true machine state is hidden but emissions are observable.",
+    ],
+    keyDetails: [
+      "Use log-probabilities so long sequences do not underflow toward zero.",
+      "Transition probabilities describe hidden-state movement; emission probabilities describe visible evidence from a state.",
+      "Viterbi finds the best single path, while forward-backward estimates marginal state probabilities.",
+      "HMMs struggle when the next state depends on long-range context beyond the previous hidden state.",
+    ],
+  },
   "gaussian-discriminant-analysis": {
     graphTitle: "What the contours are showing",
     graphNotes: [

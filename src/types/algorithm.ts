@@ -890,6 +890,63 @@ export type DynamicProgrammingState = {
   policy: DynamicProgrammingPolicyCell[];
 };
 
+export type HmmMode = "market" | "pos";
+
+export type HmmStateNode = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  color: string;
+};
+
+export type HmmTrellisCell = {
+  time: number;
+  stateKey: string;
+  stateLabel: string;
+  observation: string;
+  logProbability: number;
+  emissionLog: number;
+  transitionLog: number;
+  backPointer?: string;
+  active: boolean;
+  winning: boolean;
+};
+
+export type HmmScoreStep = {
+  time: number;
+  observation: string;
+  stateKey: string;
+  stateLabel: string;
+  transitionLabel: string;
+  transitionLog: number;
+  emissionLog: number;
+  cumulativeLog: number;
+  color: string;
+};
+
+export type HmmTaggedToken = {
+  text: string;
+  stateKey: string;
+  stateLabel: string;
+  color: string;
+  logProbability: number;
+};
+
+export type HiddenMarkovState = {
+  mode: HmmMode;
+  input: string;
+  observations: string[];
+  states: HmmStateNode[];
+  trellis: HmmTrellisCell[][];
+  bestPath: string[];
+  bestPathLabels: string[];
+  scoreSteps: HmmScoreStep[];
+  taggedTokens: HmmTaggedToken[];
+  logProbability: number;
+  phaseIndex: number;
+  phaseProgress: number;
+};
+
 export type TokenizerPiece = {
   text: string;
   id: number;
@@ -945,6 +1002,7 @@ export type ConceptFrame = {
   convex?: ConvexState;
   convolution?: ConvolutionState;
   dynamicProgramming?: DynamicProgrammingState;
+  hiddenMarkov?: HiddenMarkovState;
   tokenizer?: TokenizerState;
   summary: string;
 };

@@ -211,6 +211,7 @@ const catalogFilters: Array<{ id: CatalogFilter; label: string }> = [
 const recommendedPathIds = [
   "linear-regression",
   "bayes-rule-visualizer",
+  "hidden-markov-models",
   "gaussian-discriminant-analysis",
   "bayesian-regression",
   "polynomial-features",
@@ -268,6 +269,7 @@ const beginnerCategories = new Set<AlgorithmCategory>([
 
 const mathHeavyIds = new Set([
   "bayes-rule-visualizer",
+  "hidden-markov-models",
   "gaussian-discriminant-analysis",
   "bayesian-regression",
   "singular-value-decomposition",
