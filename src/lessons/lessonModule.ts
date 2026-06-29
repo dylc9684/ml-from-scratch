@@ -2,7 +2,7 @@ import type { AlgorithmDefinition } from "../types/algorithm";
 
 export type LessonMetadata = Pick<
   AlgorithmDefinition,
-  "id" | "name" | "category" | "summary" | "parameters"
+  "id" | "name" | "category" | "summary" | "catalog" | "parameters"
 >;
 
 export type LessonRuntime = Pick<
@@ -10,7 +10,10 @@ export type LessonRuntime = Pick<
   "makeSampleDataset" | "engine" | "controller"
 >;
 
-export type LessonContent = Pick<AlgorithmDefinition, "formulas" | "explanation">;
+export type LessonContent = Pick<
+  AlgorithmDefinition,
+  "formulas" | "explanation" | "deepDive" | "applications"
+>;
 
 export type LessonCode = AlgorithmDefinition["code"];
 
@@ -37,6 +40,7 @@ export function algorithmToLessonModule(algorithm: AlgorithmDefinition): LessonM
       name: algorithm.name,
       category: algorithm.category,
       summary: algorithm.summary,
+      catalog: algorithm.catalog,
       parameters: algorithm.parameters,
     },
     runtime: {
@@ -47,6 +51,8 @@ export function algorithmToLessonModule(algorithm: AlgorithmDefinition): LessonM
     content: {
       formulas: algorithm.formulas,
       explanation: algorithm.explanation,
+      deepDive: algorithm.deepDive,
+      applications: algorithm.applications,
     },
     code: algorithm.code,
     visualization: {

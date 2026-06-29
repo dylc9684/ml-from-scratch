@@ -1,18 +1,12 @@
 import { AlertTriangle, ArrowRight, BriefcaseBusiness, Database, Target } from "lucide-react";
 import { getDeepDiveContent } from "./AlgorithmDeepDive";
-import type { AlgorithmDefinition } from "../types/algorithm";
+import type { AlgorithmDefinition, LessonApplication } from "../types/algorithm";
 
 type Props = {
   algorithm: AlgorithmDefinition;
 };
 
-type ApplicationCard = {
-  title: string;
-  scenario: string;
-  data: string;
-  action: string;
-  caveat: string;
-};
+type ApplicationCard = LessonApplication;
 
 export function RealApplicationsPanel({ algorithm }: Props) {
   const content = getDeepDiveContent(algorithm);
@@ -83,6 +77,10 @@ function makeApplicationCards(
   realWorld: string[],
   keyDetails: string[],
 ) {
+  if (algorithm.applications && algorithm.applications.length > 0) {
+    return algorithm.applications;
+  }
+
   const examples = realWorld.length > 0 ? realWorld : [algorithm.summary];
   const caveats = keyDetails.length > 0 ? keyDetails : ["Validate on new data before trusting the visual pattern."];
   const templates = applicationTemplates(algorithm);
@@ -97,26 +95,6 @@ function makeApplicationCards(
 }
 
 function applicationTemplates(algorithm: AlgorithmDefinition) {
-  if (algorithm.id === "hidden-markov-models") {
-    return [
-      {
-        title: "Part-of-speech tagging",
-        data: "Tokenized sentences, transition counts, and word/tag emission counts",
-        action: "Decode the most likely grammatical role for every word",
-      },
-      {
-        title: "Regime detection",
-        data: "Visible market, weather, or operations events over time",
-        action: "Infer hidden state sequences such as bull, crash, recovery, or fault states",
-      },
-      {
-        title: "Streaming diagnostics",
-        data: "Sensor readings, alarms, and state transition assumptions",
-        action: "Track likely hidden machine states as observations arrive",
-      },
-    ];
-  }
-
   if (algorithm.id === "gaussian-discriminant-analysis") {
     return [
       {

@@ -74,9 +74,7 @@ export function AlgorithmCatalog({
   const recentAlgorithms = recentIds
     .map((id) => byId.get(id))
     .filter((algorithm): algorithm is AlgorithmDefinition => Boolean(algorithm));
-  const recommendedAlgorithms = recommendedPathIds
-    .map((id) => byId.get(id))
-    .filter((algorithm): algorithm is AlgorithmDefinition => Boolean(algorithm));
+  const recommendedAlgorithms = makeRecommendedAlgorithms(algorithms, byId);
 
   const toggleCategory = (category: AlgorithmCategory) => {
     setCollapsedCategories((current) => {
@@ -224,27 +222,50 @@ const recommendedPathIds = [
 ];
 
 function matchesCatalogFilter(algorithm: AlgorithmDefinition, filter: CatalogFilter) {
+  const tags = new Set(algorithm.catalog?.tags ?? []);
+
   if (filter === "all") {
     return true;
   }
 
   if (filter === "beginner") {
-    return beginnerIds.has(algorithm.id) || beginnerCategories.has(algorithm.category);
+    return (
+      algorithm.catalog?.difficulty === "Beginner" ||
+      tags.has("beginner") ||
+      beginnerIds.has(algorithm.id) ||
+      beginnerCategories.has(algorithm.category)
+    );
   }
 
   if (filter === "math") {
-    return mathHeavyIds.has(algorithm.id) || mathHeavyCategories.has(algorithm.category);
+    return tags.has("math-heavy") || mathHeavyIds.has(algorithm.id) || mathHeavyCategories.has(algorithm.category);
   }
 
   if (filter === "neural") {
-    return neuralCategories.has(algorithm.category) || algorithm.category.includes("Neural");
+    return tags.has("neural-net") || neuralCategories.has(algorithm.category) || algorithm.category.includes("Neural");
   }
 
   if (filter === "linear-algebra") {
-    return linearAlgebraIds.has(algorithm.id) || linearAlgebraCategories.has(algorithm.category);
+    return tags.has("linear-algebra") || linearAlgebraIds.has(algorithm.id) || linearAlgebraCategories.has(algorithm.category);
   }
 
-  return optimizationIds.has(algorithm.id) || optimizationCategories.has(algorithm.category);
+  return tags.has("optimization") || optimizationIds.has(algorithm.id) || optimizationCategories.has(algorithm.category);
+}
+
+function makeRecommendedAlgorithms(
+  algorithms: AlgorithmDefinition[],
+  byId: Map<string, AlgorithmDefinition>,
+) {
+  const fallbackOrder = new Map(recommendedPathIds.map((id, index) => [id, index + 1]));
+  return algorithms
+    .filter((algorithm) => algorithm.catalog?.recommendedOrder !== undefined || fallbackOrder.has(algorithm.id))
+    .sort((left, right) => {
+      const leftOrder = left.catalog?.recommendedOrder ?? (fallbackOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER);
+      const rightOrder = right.catalog?.recommendedOrder ?? (fallbackOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER);
+      return leftOrder - rightOrder;
+    })
+    .map((algorithm) => byId.get(algorithm.id))
+    .filter((algorithm): algorithm is AlgorithmDefinition => Boolean(algorithm));
 }
 
 const beginnerIds = new Set([

@@ -227,6 +227,51 @@ export type FormulaBlock = {
 
 export type CodeTemplate = (params: ParameterState) => string;
 
+export type LessonCatalogTag =
+  | "beginner"
+  | "math-heavy"
+  | "neural-net"
+  | "linear-algebra"
+  | "optimization"
+  | "probability"
+  | "sequence-model"
+  | "data-prep";
+
+export type LessonCatalogMetadata = {
+  difficulty?: "Beginner" | "Intermediate" | "Advanced";
+  tags?: LessonCatalogTag[];
+  recommendedOrder?: number;
+  prerequisites?: string[];
+};
+
+export type LessonComplexityTerm = {
+  label: string;
+  weight: number;
+};
+
+export type LessonDeepDiveContent = {
+  graphTitle: string;
+  graphNotes: string[];
+  complexity: {
+    time: string;
+    prediction?: string;
+    space: string;
+    plainEnglish: string;
+    terms: LessonComplexityTerm[];
+  };
+  realWorld: string[];
+  keyDetails: string[];
+  beginnerTerms?: Array<{ term: string; definition: string }>;
+};
+
+export type LessonApplication = {
+  title: string;
+  scenario: string;
+  data: string;
+  action: string;
+  caveat: string;
+};
+
 export type LinearRegressionFrame = {
   type: "linear-regression";
   iteration: number;
@@ -1031,12 +1076,15 @@ export type AlgorithmDefinition = {
   name: string;
   category: AlgorithmCategory;
   summary: string;
+  catalog?: LessonCatalogMetadata;
   parameters: ParameterDefinition[];
   makeSampleDataset: () => NormalizedDataset;
   engine: AlgorithmEngine;
   controller?: AlgorithmRunController;
   formulas: FormulaBlock[];
   explanation: string[];
+  deepDive?: LessonDeepDiveContent;
+  applications?: LessonApplication[];
   code: {
     python: CodeTemplate;
     javascript: CodeTemplate;
