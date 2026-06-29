@@ -210,6 +210,7 @@ const catalogFilters: Array<{ id: CatalogFilter; label: string }> = [
 
 const recommendedPathIds = [
   "linear-regression",
+  "bayesian-regression",
   "polynomial-features",
   "regularization-and-noise",
   "determinant-visualizer",
@@ -245,6 +246,7 @@ function matchesCatalogFilter(algorithm: AlgorithmDefinition, filter: CatalogFil
 
 const beginnerIds = new Set([
   "linear-regression",
+  "bayesian-regression",
   "logistic-regression",
   "knn-classifier",
   "k-means",
@@ -262,6 +264,7 @@ const beginnerCategories = new Set<AlgorithmCategory>([
 ]);
 
 const mathHeavyIds = new Set([
+  "bayesian-regression",
   "singular-value-decomposition",
   "non-negative-matrix-factorization",
   "determinant-visualizer",
@@ -323,7 +326,7 @@ const optimizationCategories = new Set<AlgorithmCategory>([
 ]);
 
 const categoryNotes: Record<AlgorithmCategory, string> = {
-  Regression: "Linear models for continuous prediction.",
+  Regression: "Linear and probabilistic models for continuous prediction.",
   "Logistic Regression & Classification":
     "Binary and multiclass decision boundaries.",
   "Decision Trees & Random Forests":

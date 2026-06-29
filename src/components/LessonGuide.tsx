@@ -22,7 +22,7 @@ type Props = {
   algorithm: AlgorithmDefinition;
   frame: AlgorithmFrame | null;
   metrics: Metric[];
-  onOpenPanel: (panel: "map" | "math" | "code" | "deepDive") => void;
+  onOpenPanel: (panel: "map" | "applications" | "math" | "code" | "deepDive") => void;
 };
 
 export function LessonGuide({ algorithm, frame, metrics, onOpenPanel }: Props) {
@@ -84,6 +84,7 @@ export function LessonGuide({ algorithm, frame, metrics, onOpenPanel }: Props) {
       label: "Real-world example",
       value: content.realWorld[0] ?? "Use this as a visual baseline before production modeling.",
       icon: Workflow,
+      onClick: () => onOpenPanel("applications"),
     },
     {
       label: "Common failure mode",

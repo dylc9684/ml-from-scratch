@@ -611,6 +611,7 @@ const selected = scores.sort(descending).slice(0, topK);`,
 });
 
 const defaultPolynomialPoints = makeDefaultPolynomialPointSet();
+const defaultBayesianPoints = makeDefaultBayesianPointSet();
 
 const polynomialFeatures = makeConceptAlgorithm({
   id: "polynomial-features",
@@ -731,6 +732,161 @@ const curve = xGrid.map((x) => ({
   },
 });
 
+const bayesianRegression = makeConceptAlgorithm({
+  id: "bayesian-regression",
+  name: "Bayesian Regression",
+  category: "Regression",
+  summary: "Fits a linear trend while showing uncertainty that shrinks as evidence arrives.",
+  parameters: [
+    {
+      kind: "point-set",
+      id: "bayesianPoints",
+      label: "Bayesian data points",
+      defaultValue: defaultBayesianPoints,
+      maxPoints: 42,
+    },
+    {
+      kind: "range",
+      id: "bayesianNoise",
+      label: "Observation noise sigma",
+      min: 0.15,
+      max: 1.5,
+      step: 0.05,
+      defaultValue: 0.45,
+      format: "decimal",
+    },
+    {
+      kind: "range",
+      id: "bayesianPrior",
+      label: "Prior weight scale",
+      min: 0.5,
+      max: 6,
+      step: 0.25,
+      defaultValue: 2.5,
+      format: "decimal",
+    },
+    {
+      kind: "action",
+      id: "bayesianSampleSeed",
+      label: "Posterior line samples",
+      buttonLabel: "Sample 20 Possible Lines",
+      min: 0,
+      max: 200,
+      step: 1,
+      defaultValue: 0,
+      format: "integer",
+    },
+  ],
+  sample: () => makeDataset("Generated Bayesian regression sample", defaultBayesianPoints.points),
+  formulas: [
+    {
+      title: "Posterior covariance",
+      expression: "S_N=(S_0^{-1}+\\sigma^{-2}\\Phi^T\\Phi)^{-1}",
+    },
+    {
+      title: "Posterior mean",
+      expression: "m_N=S_N(S_0^{-1}m_0+\\sigma^{-2}\\Phi^Ty)",
+    },
+    {
+      title: "Predictive uncertainty",
+      expression: "\\sigma_*^2=\\sigma^2+\\phi_*^T S_N\\phi_*",
+    },
+  ],
+  explanation: [
+    "Bayesian regression keeps a distribution over plausible lines instead of committing to one best line.",
+    "The shaded band is wide where the model has little evidence and tight near observed data.",
+    "New points update the posterior covariance, so the uncertainty envelope collapses locally as evidence accumulates.",
+  ],
+  engine: (_, params) => {
+    const noiseSigma = Math.max(0.15, Math.min(1.5, numberParam(params, "bayesianNoise", 0.45)));
+    const priorScale = Math.max(0.5, Math.min(6, numberParam(params, "bayesianPrior", 2.5)));
+    const sampleSeed = Math.max(0, Math.round(numberParam(params, "bayesianSampleSeed", 0)));
+    const points = pointSetParam(params, "bayesianPoints", defaultBayesianPoints).points;
+    const fit = fitBayesianRegression(points, noiseSigma, priorScale, sampleSeed);
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: sampleSeed,
+        points: fit.points,
+        series: [
+          {
+            label: "posterior mean",
+            points: fit.meanLine,
+            color: "#0f766e",
+          },
+        ],
+        bayesianRegression: fit,
+        summary: `${fit.points.length} points · avg uncertainty ±${fit.averageUncertainty.toFixed(2)} · samples ${fit.sampleLines.length}`,
+      },
+      [
+        { label: "Points", value: String(fit.points.length) },
+        { label: "Avg uncertainty", value: `±${fit.averageUncertainty.toFixed(2)}` },
+        { label: "Noise sigma", value: noiseSigma.toFixed(2) },
+        { label: "Prior scale", value: priorScale.toFixed(2) },
+      ],
+    );
+  },
+  python: (params) => {
+    const noiseSigma = numberParam(params, "bayesianNoise", 0.45).toFixed(2);
+    const priorScale = numberParam(params, "bayesianPrior", 2.5).toFixed(2);
+
+    return `import numpy as np
+
+sigma = ${noiseSigma}
+prior_scale = ${priorScale}
+
+# Phi has one row per point: [1, x]
+Phi = np.c_[np.ones(len(x)), x]
+y = np.asarray(y)
+
+S0_inv = np.eye(2) / (prior_scale ** 2)
+SN = np.linalg.inv(S0_inv + (Phi.T @ Phi) / (sigma ** 2))
+mN = SN @ ((Phi.T @ y) / (sigma ** 2))
+
+grid = np.linspace(x.min() - 1, x.max() + 1, 180)
+Phi_star = np.c_[np.ones(len(grid)), grid]
+mean = Phi_star @ mN
+variance = sigma ** 2 + np.sum((Phi_star @ SN) * Phi_star, axis=1)
+std = np.sqrt(variance)`;
+  },
+  javascript: (params) => {
+    const noiseSigma = numberParam(params, "bayesianNoise", 0.45).toFixed(2);
+    const priorScale = numberParam(params, "bayesianPrior", 2.5).toFixed(2);
+
+    return `const sigma = ${noiseSigma};
+const priorScale = ${priorScale};
+const noiseVar = sigma ** 2;
+const priorVar = priorScale ** 2;
+
+let precision = [
+  [1 / priorVar, 0],
+  [0, 1 / priorVar],
+];
+let target = [0, 0];
+
+for (const { x, y } of points) {
+  const phi = [1, x];
+  precision[0][0] += (phi[0] * phi[0]) / noiseVar;
+  precision[0][1] += (phi[0] * phi[1]) / noiseVar;
+  precision[1][0] += (phi[1] * phi[0]) / noiseVar;
+  precision[1][1] += (phi[1] * phi[1]) / noiseVar;
+  target[0] += (phi[0] * y) / noiseVar;
+  target[1] += (phi[1] * y) / noiseVar;
+}
+
+const covariance = invert2x2(precision);
+const meanWeights = matVec2(covariance, target);
+
+const band = xGrid.map((x) => {
+  const phi = [1, x];
+  const mean = meanWeights[0] + meanWeights[1] * x;
+  const variance = noiseVar + dot(phi, matVec2(covariance, phi));
+  return { x, mean, std: Math.sqrt(variance) };
+});`;
+  },
+});
+
 function makeDefaultPolynomialPointSet() {
   const points = Array.from({ length: 17 }, (_, index) => {
     const x = -3.2 + (index / 16) * 6.4;
@@ -740,6 +896,24 @@ function makeDefaultPolynomialPointSet() {
       x: round(x),
       y: round(wave + noise),
       label: "sample",
+    };
+  });
+
+  return {
+    kind: "point-set" as const,
+    points,
+  };
+}
+
+function makeDefaultBayesianPointSet() {
+  const points = Array.from({ length: 7 }, (_, index) => {
+    const x = -3 + index;
+    const signal = 0.72 * x + 0.45;
+    const noise = Math.sin(index * 1.9) * 0.34 + Math.cos(index * 0.7) * 0.12;
+    return {
+      x: round(x),
+      y: round(signal + noise),
+      label: "evidence",
     };
   });
 
@@ -772,6 +946,161 @@ function pointSetParam(params: ParameterState, key: string, fallback: typeof def
   }
 
   return fallback;
+}
+
+function fitBayesianRegression(
+  points: DataPoint[],
+  noiseSigma: number,
+  priorScale: number,
+  sampleSeed: number,
+) {
+  const noiseVariance = noiseSigma ** 2;
+  const priorVariance = priorScale ** 2;
+  const evidence = points.slice(0, 42);
+  const precision: [[number, number], [number, number]] = [
+    [1 / priorVariance, 0],
+    [0, 1 / priorVariance],
+  ];
+  const target: [number, number] = [0, 0];
+
+  evidence.forEach((point) => {
+    const phi: [number, number] = [1, point.x];
+    precision[0][0] += (phi[0] * phi[0]) / noiseVariance;
+    precision[0][1] += (phi[0] * phi[1]) / noiseVariance;
+    precision[1][0] += (phi[1] * phi[0]) / noiseVariance;
+    precision[1][1] += (phi[1] * phi[1]) / noiseVariance;
+    target[0] += (phi[0] * point.y) / noiseVariance;
+    target[1] += (phi[1] * point.y) / noiseVariance;
+  });
+
+  const covariance = invert2x2(precision);
+  const meanWeights = matVec2(covariance, target);
+  const xValues = evidence.map((point) => point.x);
+  const yValues = evidence.map((point) => point.y);
+  const rawXDomain =
+    xValues.length > 0 ? expandDomain(Math.min(...xValues), Math.max(...xValues), 0.6) : ([-4, 4] as [number, number]);
+  const xDomain: [number, number] = [Math.min(-4, rawXDomain[0]), Math.max(4, rawXDomain[1])];
+  const grid = Array.from({ length: 180 }, (_, index) => xDomain[0] + (index / 179) * (xDomain[1] - xDomain[0]));
+  const predictions = grid.map((x) => bayesianPrediction(x, meanWeights, covariance, noiseVariance));
+  const meanLine = predictions.map((prediction) => ({
+    x: prediction.x,
+    y: prediction.mean,
+    label: "posterior mean",
+  }));
+  const upperBand = predictions.map((prediction) => ({
+    x: prediction.x,
+    y: prediction.mean + prediction.std,
+    label: "upper uncertainty",
+  }));
+  const lowerBand = predictions.map((prediction) => ({
+    x: prediction.x,
+    y: prediction.mean - prediction.std,
+    label: "lower uncertainty",
+  }));
+  const sampleLines = sampleSeed > 0 ? sampleBayesianLines(meanWeights, covariance, xDomain, sampleSeed) : [];
+  const bandValues = [...upperBand.map((point) => point.y), ...lowerBand.map((point) => point.y)];
+  const sampleValues = sampleLines.flatMap((line) => line.points.map((point) => point.y));
+  const ySource = [...yValues, ...bandValues, ...sampleValues, -3, 3].filter(Number.isFinite);
+  const yDomain = expandDomain(Math.min(...ySource), Math.max(...ySource), 0.18);
+
+  return {
+    points: evidence,
+    meanWeights,
+    covariance,
+    meanLine,
+    upperBand,
+    lowerBand,
+    sampleLines,
+    noiseVariance,
+    priorVariance,
+    averageUncertainty: average(predictions.map((prediction) => prediction.std)),
+    xDomain,
+    yDomain,
+  };
+}
+
+function bayesianPrediction(
+  x: number,
+  meanWeights: [number, number],
+  covariance: [[number, number], [number, number]],
+  noiseVariance: number,
+) {
+  const phi: [number, number] = [1, x];
+  const covariancePhi = matVec2(covariance, phi);
+  const variance = noiseVariance + phi[0] * covariancePhi[0] + phi[1] * covariancePhi[1];
+
+  return {
+    x,
+    mean: meanWeights[0] + meanWeights[1] * x,
+    std: Math.sqrt(Math.max(0, variance)),
+  };
+}
+
+function sampleBayesianLines(
+  meanWeights: [number, number],
+  covariance: [[number, number], [number, number]],
+  xDomain: [number, number],
+  seed: number,
+) {
+  const l00 = Math.sqrt(Math.max(covariance[0][0], 1e-12));
+  const l10 = covariance[1][0] / l00;
+  const l11 = Math.sqrt(Math.max(covariance[1][1] - l10 ** 2, 1e-12));
+  const random = seededRandom(seed + 1729);
+
+  return Array.from({ length: 20 }, (_, index) => {
+    const [z0, z1] = gaussianPair(random);
+    const intercept = meanWeights[0] + l00 * z0;
+    const slope = meanWeights[1] + l10 * z0 + l11 * z1;
+    const points = xDomain.map((x) => ({
+      x,
+      y: intercept + slope * x,
+      label: "posterior sample",
+    }));
+
+    return {
+      intercept,
+      slope,
+      points,
+      color: colors[index % colors.length],
+    };
+  });
+}
+
+function invert2x2(matrix: [[number, number], [number, number]]): [[number, number], [number, number]] {
+  const determinant = matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+  const safeDeterminant = Math.abs(determinant) < 1e-12 ? (determinant < 0 ? -1e-12 : 1e-12) : determinant;
+
+  return [
+    [matrix[1][1] / safeDeterminant, -matrix[0][1] / safeDeterminant],
+    [-matrix[1][0] / safeDeterminant, matrix[0][0] / safeDeterminant],
+  ];
+}
+
+function matVec2(matrix: [[number, number], [number, number]], vector: [number, number]): [number, number] {
+  return [
+    matrix[0][0] * vector[0] + matrix[0][1] * vector[1],
+    matrix[1][0] * vector[0] + matrix[1][1] * vector[1],
+  ];
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gaussianPair(random: () => number): [number, number] {
+  const u1 = Math.max(1e-9, random());
+  const u2 = Math.max(1e-9, random());
+  const radius = Math.sqrt(-2 * Math.log(u1));
+  const angle = Math.PI * 2 * u2;
+
+  return [radius * Math.cos(angle), radius * Math.sin(angle)];
 }
 
 function fitPolynomialRegression(points: DataPoint[], degree: number) {
@@ -7628,6 +7957,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   knnClassifier,
   featureSelection,
   polynomialFeatures,
+  bayesianRegression,
   modelEvaluation,
   biasVariance,
   ensembleMethods,

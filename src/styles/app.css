@@ -932,6 +932,7 @@ h1 {
 .visual-shell.svd-shell,
 .visual-shell.nmf-shell,
 .visual-shell.polynomial-shell,
+.visual-shell.bayesian-regression-shell,
 .visual-shell.determinant-shell,
 .visual-shell.eigen-direction-shell,
 .visual-shell.regularization-shell,
@@ -946,6 +947,7 @@ h1 {
 .visual-shell.svd-shell,
 .visual-shell.nmf-shell,
 .visual-shell.polynomial-shell,
+.visual-shell.bayesian-regression-shell,
 .visual-shell.determinant-shell,
 .visual-shell.eigen-direction-shell,
 .visual-shell.regularization-shell,
@@ -964,6 +966,7 @@ h1 {
 
 .visual-shell.dynamic-programming-shell canvas,
 .visual-shell.polynomial-shell canvas,
+.visual-shell.bayesian-regression-shell canvas,
 .visual-shell.determinant-shell canvas,
 .visual-shell.eigen-direction-shell canvas {
   cursor: crosshair;
@@ -978,6 +981,7 @@ h1 {
 .visual-shell.svd-shell canvas,
 .visual-shell.nmf-shell canvas,
 .visual-shell.polynomial-shell canvas,
+.visual-shell.bayesian-regression-shell canvas,
 .visual-shell.determinant-shell canvas,
 .visual-shell.eigen-direction-shell canvas,
 .visual-shell.regularization-shell canvas,
@@ -992,6 +996,7 @@ h1 {
 .visual-shell.svd-shell canvas,
 .visual-shell.nmf-shell canvas,
 .visual-shell.polynomial-shell canvas,
+.visual-shell.bayesian-regression-shell canvas,
 .visual-shell.determinant-shell canvas,
 .visual-shell.eigen-direction-shell canvas,
 .visual-shell.regularization-shell canvas,
@@ -1121,6 +1126,141 @@ h1 {
 
 .secondary-panel-body {
   min-width: 0;
+}
+
+.applications-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.applications-header {
+  display: grid;
+  gap: 5px;
+  max-width: 920px;
+}
+
+.applications-header h3 {
+  font-size: 1.08rem;
+  letter-spacing: 0;
+}
+
+.applications-header p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.application-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.application-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}
+
+.application-card-title {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.application-card-title span {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.application-card h4 {
+  font-size: 0.98rem;
+  letter-spacing: 0;
+}
+
+.application-card p,
+.application-caveat,
+.application-flow-pill small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.application-card p {
+  font-size: 0.9rem;
+}
+
+.application-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.application-flow > svg {
+  color: var(--muted);
+}
+
+.application-flow-pill {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  min-height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7fafc;
+  padding: 9px;
+}
+
+.application-flow-pill svg {
+  color: var(--accent-strong);
+  margin-top: 2px;
+}
+
+.application-flow-pill span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.application-flow-pill strong {
+  color: var(--ink);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.application-flow-pill small {
+  font-size: 0.78rem;
+}
+
+.application-caveat {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  border: 1px solid rgba(183, 121, 31, 0.28);
+  border-radius: 8px;
+  background: #fffaf0;
+  padding: 9px;
+  font-size: 0.82rem;
+}
+
+.application-caveat svg {
+  color: var(--amber);
+  margin-top: 2px;
 }
 
 .algorithm-deep-dive {
@@ -1930,6 +2070,10 @@ select {
   .lesson-guide-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .application-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 780px) {
@@ -2022,6 +2166,8 @@ select {
   .visual-shell.nmf-shell canvas,
   .visual-shell.polynomial-shell,
   .visual-shell.polynomial-shell canvas,
+  .visual-shell.bayesian-regression-shell,
+  .visual-shell.bayesian-regression-shell canvas,
   .visual-shell.determinant-shell,
   .visual-shell.determinant-shell canvas,
   .visual-shell.eigen-direction-shell,
@@ -2069,6 +2215,15 @@ select {
 
   .lesson-current-run em {
     margin-left: 0;
+  }
+
+  .application-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .application-flow > svg {
+    transform: rotate(90deg);
+    justify-self: center;
   }
 
   .graph-legend {

@@ -228,6 +228,37 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Feature scaling makes gradient descent smoother and easier to tune.",
     ],
   },
+  "bayesian-regression": {
+    graphTitle: "What the band and sampled lines are showing",
+    graphNotes: [
+      "The green line is the posterior mean: the center of the model's current belief about the linear trend.",
+      "The blue shaded region is predictive uncertainty. It tightens near evidence and widens where the model is extrapolating.",
+      "Sampled lines are plausible parameter draws from the posterior; they fan out with little data and cluster as evidence grows.",
+    ],
+    complexity: {
+      time: "O(n d^2 + d^3) for the closed-form posterior; here d=2 for intercept and slope.",
+      prediction: "O(d^2) per x value when computing uncertainty, or O(d) for the mean line only.",
+      space: "O(d^2) for the covariance matrix plus O(n d) for the design matrix if stored.",
+      plainEnglish:
+        "The tiny browser demo is cheap because it only learns intercept and slope. Bigger Bayesian linear models get more expensive as feature count grows because covariance is a d by d matrix.",
+      terms: [
+        { label: "samples n", weight: 68 },
+        { label: "features d", weight: 62 },
+        { label: "covariance d^2", weight: 78 },
+      ],
+    },
+    realWorld: [
+      "Forecasting demand, revenue, or risk while returning an interval instead of a single overconfident number.",
+      "Active learning and experiment planning, where the next sample should be collected where uncertainty is largest.",
+      "Small-data scientific modeling, where a prior keeps the model reasonable until enough measurements arrive.",
+    ],
+    keyDetails: [
+      "The prior controls how strongly the model trusts small weights before seeing data.",
+      "The noise setting controls how much scatter the model expects around the true line.",
+      "Uncertainty is lowest near observed x values and grows when the model extrapolates far away from evidence.",
+      "The demo assumes a linear relationship and Gaussian noise; curved patterns still need richer features or another model.",
+    ],
+  },
   "k-means": {
     graphTitle: "What the graph is showing",
     graphNotes: [

@@ -57,6 +57,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isSvdLesson = frame?.type === "concept-demo" && Boolean(frame.svd);
   const isNmfLesson = frame?.type === "concept-demo" && Boolean(frame.nmf);
   const isPolynomialLesson = frame?.type === "concept-demo" && Boolean(frame.polynomial);
+  const isBayesianRegressionLesson = frame?.type === "concept-demo" && Boolean(frame.bayesianRegression);
   const isDeterminantLesson = frame?.type === "concept-demo" && Boolean(frame.determinant);
   const isEigenDirectionLesson = frame?.type === "concept-demo" && Boolean(frame.eigenDirection);
   const isRegularizationLesson = frame?.type === "concept-demo" && Boolean(frame.regularization);
@@ -97,7 +98,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       frame?.type !== "concept-demo" ||
       !params ||
       !onParamChange ||
-      (!frame.dynamicProgramming && !frame.polynomial)
+      (!frame.dynamicProgramming && !frame.polynomial && !frame.bayesianRegression)
     ) {
       return;
     }
@@ -129,6 +130,24 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       const nextPoints = [...currentPointSet.points, { ...nextPoint, label: "custom" }].slice(-42);
       onParamChange("polynomialPoints", { kind: "point-set", points: nextPoints });
       setPolynomialHoverIndex(nextPoints.length - 1);
+      return;
+    }
+
+    if (frame.bayesianRegression) {
+      const nextPoint = canvasPointToBayesianPoint(frame.bayesianRegression, size, point);
+      if (!nextPoint) {
+        return;
+      }
+
+      const currentPointSet =
+        typeof params.bayesianPoints === "object" &&
+        params.bayesianPoints !== null &&
+        "kind" in params.bayesianPoints &&
+        params.bayesianPoints.kind === "point-set"
+          ? params.bayesianPoints
+          : { kind: "point-set" as const, points: frame.bayesianRegression.points };
+      const nextPoints = [...currentPointSet.points, { ...nextPoint, label: "custom" }].slice(-42);
+      onParamChange("bayesianPoints", { kind: "point-set", points: nextPoints });
       return;
     }
 
@@ -262,6 +281,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       } ${
         isPolynomialLesson ? "polynomial-shell" : ""
       } ${
+        isBayesianRegressionLesson ? "bayesian-regression-shell" : ""
+      } ${
         isDeterminantLesson ? "determinant-shell" : ""
       } ${
         isEigenDirectionLesson ? "eigen-direction-shell" : ""
@@ -376,6 +397,11 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.polynomial) {
     paintPolynomialLesson(context, frame, size, interaction.polynomialHoverIndex ?? null);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.bayesianRegression) {
+    paintBayesianRegressionLesson(context, frame, size);
     return;
   }
 
@@ -2914,6 +2940,387 @@ function canvasPointToPolynomialPoint(
 ) {
   const { plotPane } = polynomialLayout(size);
   const { plot, x, y } = polynomialScales(polynomial, plotPane);
+  if (
+    point.x < plot.x ||
+    point.x > plot.x + plot.width ||
+    point.y < plot.y ||
+    point.y > plot.y + plot.height
+  ) {
+    return null;
+  }
+
+  return {
+    x: Number(x.invert(point.x).toFixed(3)),
+    y: Number(y.invert(point.y).toFixed(3)),
+  };
+}
+
+function paintBayesianRegressionLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const bayesian = frame.bayesianRegression;
+  if (!bayesian) {
+    return;
+  }
+
+  const layout = bayesianRegressionLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Interactive uncertainty sandbox", layout.plotPane.x, layout.plotPane.y - 24);
+  context.fillText("Posterior state", layout.infoPane.x, layout.infoPane.y - 24);
+
+  paintBayesianRegressionPlot(context, bayesian, layout.plotPane);
+  paintBayesianPosteriorPanel(context, bayesian, layout.infoPane);
+}
+
+function bayesianRegressionLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const plotPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(350, size.height * 0.53) }
+    : { x: padding, y: 58, width: Math.max(500, size.width * 0.62), height: size.height - 96 };
+  const infoPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: plotPane.y + plotPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(280, size.height - plotPane.height - 120),
+      }
+    : {
+        x: plotPane.x + plotPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - plotPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { plotPane, infoPane };
+}
+
+function bayesianRegressionPlotArea(pane: CanvasPane): CanvasPane {
+  return {
+    x: pane.x + 54,
+    y: pane.y + 72,
+    width: pane.width - 82,
+    height: pane.height - 128,
+  };
+}
+
+function bayesianRegressionScales(
+  bayesian: NonNullable<ConceptFrame["bayesianRegression"]>,
+  pane: CanvasPane,
+) {
+  const plot = bayesianRegressionPlotArea(pane);
+
+  return {
+    plot,
+    x: d3.scaleLinear().domain(bayesian.xDomain).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain(bayesian.yDomain).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintBayesianRegressionPlot(
+  context: CanvasRenderingContext2D,
+  bayesian: NonNullable<ConceptFrame["bayesianRegression"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Posterior mean plus uncertainty band", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${bayesian.points.length} evidence points · slope ${formatPolynomialNumber(bayesian.meanWeights[1])} · avg std ${bayesian.averageUncertainty.toFixed(2)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const { plot, x, y } = bayesianRegressionScales(bayesian, pane);
+  context.fillStyle = "rgba(247, 250, 252, 0.95)";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  context.strokeStyle = "rgba(100, 116, 139, 0.18)";
+  context.lineWidth = 1;
+  x.ticks(7).forEach((tick) => {
+    const tx = x(tick);
+    context.beginPath();
+    context.moveTo(tx, plot.y);
+    context.lineTo(tx, plot.y + plot.height);
+    context.stroke();
+  });
+  y.ticks(6).forEach((tick) => {
+    const ty = y(tick);
+    context.beginPath();
+    context.moveTo(plot.x, ty);
+    context.lineTo(plot.x + plot.width, ty);
+    context.stroke();
+  });
+
+  context.strokeStyle = "#c9d4da";
+  context.beginPath();
+  context.moveTo(plot.x, y(0));
+  context.lineTo(plot.x + plot.width, y(0));
+  context.moveTo(x(0), plot.y);
+  context.lineTo(x(0), plot.y + plot.height);
+  context.stroke();
+
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+
+  paintBayesianBand(context, bayesian, x, y);
+
+  bayesian.sampleLines.forEach((line, index) => {
+    context.strokeStyle = line.color;
+    context.globalAlpha = 0.18 + (index % 4) * 0.035;
+    context.lineWidth = 1.2;
+    drawBayesianPolyline(context, line.points, x, y);
+  });
+  context.globalAlpha = 1;
+
+  context.strokeStyle = "#0f766e";
+  context.lineWidth = 3;
+  drawBayesianPolyline(context, bayesian.meanLine, x, y);
+
+  bayesian.points.forEach((point) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    context.fillStyle = point.label === "custom" ? "#fff7ed" : "#2f6fbe";
+    context.strokeStyle = point.label === "custom" ? "#b7791f" : "#ffffff";
+    context.lineWidth = point.label === "custom" ? 2.4 : 1.6;
+    context.beginPath();
+    context.arc(px, py, point.label === "custom" ? 6 : 5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  });
+  context.restore();
+
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  x.ticks(5).forEach((tick) => {
+    context.fillText(tick.toFixed(1), x(tick), plot.y + plot.height + 18);
+  });
+  context.textAlign = "right";
+  y.ticks(5).forEach((tick) => {
+    context.fillText(tick.toFixed(1), plot.x - 8, y(tick) + 4);
+  });
+
+  const statusBox = {
+    x: pane.x + 14,
+    y: pane.y + pane.height - 42,
+    width: pane.width - 28,
+    height: 26,
+  };
+  paintRoundedRect(context, statusBox.x, statusBox.y, statusBox.width, statusBox.height, 8, "#f7fafc", "#d8e0e5");
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(context, "Click a wide shaded region to add evidence and watch uncertainty shrink around it.", statusBox.width - 16),
+    statusBox.x + 8,
+    statusBox.y + 17,
+  );
+
+  context.restore();
+}
+
+function paintBayesianBand(
+  context: CanvasRenderingContext2D,
+  bayesian: NonNullable<ConceptFrame["bayesianRegression"]>,
+  x: (value: number) => number,
+  y: (value: number) => number,
+) {
+  if (bayesian.upperBand.length === 0 || bayesian.lowerBand.length === 0) {
+    return;
+  }
+
+  context.beginPath();
+  bayesian.upperBand.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    if (index === 0) {
+      context.moveTo(px, py);
+    } else {
+      context.lineTo(px, py);
+    }
+  });
+  [...bayesian.lowerBand].reverse().forEach((point) => {
+    context.lineTo(x(point.x), y(point.y));
+  });
+  context.closePath();
+  context.fillStyle = "rgba(47, 111, 190, 0.16)";
+  context.fill();
+
+  context.strokeStyle = "rgba(47, 111, 190, 0.45)";
+  context.lineWidth = 1.4;
+  drawBayesianPolyline(context, bayesian.upperBand, x, y);
+  drawBayesianPolyline(context, bayesian.lowerBand, x, y);
+}
+
+function drawBayesianPolyline(
+  context: CanvasRenderingContext2D,
+  points: DataPoint[],
+  x: (value: number) => number,
+  y: (value: number) => number,
+) {
+  context.beginPath();
+  points.forEach((point, index) => {
+    const px = x(point.x);
+    const py = y(point.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      return;
+    }
+    if (index === 0) {
+      context.moveTo(px, py);
+    } else {
+      context.lineTo(px, py);
+    }
+  });
+  context.stroke();
+}
+
+function paintBayesianPosteriorPanel(
+  context: CanvasRenderingContext2D,
+  bayesian: NonNullable<ConceptFrame["bayesianRegression"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Distribution over plausible lines", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      bayesian.sampleLines.length > 0
+        ? `${bayesian.sampleLines.length} posterior draws are overlaid on the plot.`
+        : "Press the sample button to draw 20 possible lines from the posterior.",
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const chipTop = pane.y + 72;
+  const chipGap = 10;
+  const chipWidth = (pane.width - 28 - chipGap) / 2;
+  paintBayesianStatChip(context, pane.x + 14, chipTop, chipWidth, "intercept", formatPolynomialNumber(bayesian.meanWeights[0]), "#2f6fbe");
+  paintBayesianStatChip(context, pane.x + 14 + chipWidth + chipGap, chipTop, chipWidth, "slope", formatPolynomialNumber(bayesian.meanWeights[1]), "#0f766e");
+
+  const matrixTop = chipTop + 76;
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Posterior covariance S_N", pane.x + 14, matrixTop);
+  const cellGap = 8;
+  const cellWidth = (pane.width - 28 - cellGap) / 2;
+  const covarianceValues = [
+    bayesian.covariance[0][0],
+    bayesian.covariance[0][1],
+    bayesian.covariance[1][0],
+    bayesian.covariance[1][1],
+  ];
+  covarianceValues.forEach((value, index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    const xPos = pane.x + 14 + column * (cellWidth + cellGap);
+    const yPos = matrixTop + 16 + row * 42;
+    paintRoundedRect(context, xPos, yPos, cellWidth, 34, 8, "#ffffff", "#d8e0e5");
+    context.fillStyle = "#17212b";
+    context.font = "900 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.fillText(formatPolynomialNumber(value), xPos + 9, yPos + 21);
+  });
+
+  const meterTop = matrixTop + 116;
+  const meterWidth = pane.width - 28;
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Average predictive uncertainty", pane.x + 14, meterTop);
+  context.fillStyle = "#eef3f6";
+  context.fillRect(pane.x + 14, meterTop + 16, meterWidth, 12);
+  context.fillStyle = "#2f6fbe";
+  context.fillRect(
+    pane.x + 14,
+    meterTop + 16,
+    Math.min(1, bayesian.averageUncertainty / 3) * meterWidth,
+    12,
+  );
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    `std ${bayesian.averageUncertainty.toFixed(2)} · noise ${Math.sqrt(bayesian.noiseVariance).toFixed(2)} · prior ${Math.sqrt(bayesian.priorVariance).toFixed(2)}`,
+    pane.x + 14,
+    meterTop + 46,
+  );
+
+  const notesTop = meterTop + 78;
+  const notes = [
+    "Few points leave many lines plausible, so the blue band fans outward.",
+    "A new point updates both the mean line and the covariance matrix.",
+    "The band grows far from evidence because extrapolation is less certain.",
+  ];
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("What to watch", pane.x + 14, notesTop);
+  notes.forEach((note, index) => {
+    const yPos = notesTop + 22 + index * 46;
+    if (yPos + 28 > pane.y + pane.height - 18) {
+      return;
+    }
+    context.fillStyle = "#f7fafc";
+    paintRoundedRect(context, pane.x + 14, yPos, pane.width - 28, 34, 8, "#f7fafc", "#d8e0e5");
+    context.fillStyle = "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    wrapCanvasText(context, note, pane.x + 24, yPos + 14, pane.width - 48, 12, 2);
+  });
+
+  context.restore();
+}
+
+function paintBayesianStatChip(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  label: string,
+  value: string,
+  color: string,
+) {
+  paintRoundedRect(context, x, y, width, 54, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = color;
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, x + 10, y + 18);
+  context.fillStyle = "#17212b";
+  context.font = "900 16px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillText(fitCanvasText(context, value, width - 20), x + 10, y + 39);
+}
+
+function canvasPointToBayesianPoint(
+  bayesian: NonNullable<ConceptFrame["bayesianRegression"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const { plotPane } = bayesianRegressionLayout(size);
+  const { plot, x, y } = bayesianRegressionScales(bayesian, plotPane);
   if (
     point.x < plot.x ||
     point.x > plot.x + plot.width ||

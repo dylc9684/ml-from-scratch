@@ -22,6 +22,7 @@ import { AlgorithmDeepDive } from "./components/AlgorithmDeepDive";
 import { LessonGuide } from "./components/LessonGuide";
 import { MetricsGrid } from "./components/MetricsGrid";
 import { ParameterControls } from "./components/ParameterControls";
+import { RealApplicationsPanel } from "./components/RealApplicationsPanel";
 import { VisualizationCanvas } from "./components/VisualizationCanvas";
 import type {
   EngineResult,
@@ -32,7 +33,7 @@ import type {
   RawDataset,
 } from "./types/algorithm";
 
-type SecondaryPanel = "map" | "data" | "math" | "code" | "deepDive";
+type SecondaryPanel = "map" | "applications" | "data" | "math" | "code" | "deepDive";
 
 export default function App() {
   const [query, setQuery] = useState("");
@@ -370,7 +371,7 @@ export default function App() {
                 <h3>Go deeper when the graph raises a question.</h3>
               </div>
               <div className="secondary-tabbar" role="tablist" aria-label="Lesson study panels">
-                {(["map", "data", "math", "code", "deepDive"] as SecondaryPanel[]).map((panel) => (
+                {(["map", "applications", "data", "math", "code", "deepDive"] as SecondaryPanel[]).map((panel) => (
                   <button
                     key={panel}
                     className={`tab ${activePanel === panel ? "active" : ""}`}
@@ -392,6 +393,9 @@ export default function App() {
                     activeId={activeAlgorithm.id}
                     onSelect={handleAlgorithmSelect}
                   />
+                )}
+                {activePanel === "applications" && (
+                  <RealApplicationsPanel algorithm={activeAlgorithm} />
                 )}
                 {activePanel === "data" && (
                   <DatasetPanel
@@ -426,6 +430,9 @@ export default function App() {
 function panelLabel(panel: SecondaryPanel) {
   if (panel === "map") {
     return "Concept Map";
+  }
+  if (panel === "applications") {
+    return "Applications";
   }
   if (panel === "data") {
     return "Data";

@@ -55,6 +55,7 @@ export const conceptDomainColors: Record<ConceptDomain, string> = {
 
 const conceptDomains: Record<string, ConceptDomain> = {
   "linear-regression": "foundations",
+  "bayesian-regression": "probability",
   "logistic-regression": "supervised",
   "decision-tree-split": "supervised",
   "support-vector-machine": "supervised",
@@ -95,7 +96,11 @@ export const conceptRelationships: ConceptRelationship[] = [
   { source: "linear-regression", target: "optimizer-race", label: "gradient descent", kind: "optimizes" },
   { source: "linear-regression", target: "feature-selection", label: "feature weights", kind: "depends-on" },
   { source: "linear-regression", target: "polynomial-features", label: "expanded design matrix", kind: "extends" },
+  { source: "linear-regression", target: "bayesian-regression", label: "uncertainty-aware line", kind: "extends" },
   { source: "linear-regression", target: "bias-variance", label: "fit complexity", kind: "evaluates" },
+  { source: "bayesian-regression", target: "regularization-and-noise", label: "Gaussian prior shrinkage", kind: "depends-on" },
+  { source: "bayesian-regression", target: "stochastic-processes", label: "posterior sampling", kind: "foundation" },
+  { source: "bayesian-regression", target: "model-evaluation", label: "uncertainty calibration", kind: "evaluates" },
   { source: "logistic-regression", target: "model-evaluation", label: "classification metrics", kind: "evaluates" },
   { source: "logistic-regression", target: "loss-functions", label: "cross-entropy", kind: "depends-on" },
   { source: "logistic-regression", target: "activation-functions", label: "sigmoid link", kind: "depends-on" },

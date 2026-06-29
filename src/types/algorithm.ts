@@ -612,6 +612,28 @@ export type PolynomialState = {
   yDomain: [number, number];
 };
 
+export type BayesianSampleLine = {
+  slope: number;
+  intercept: number;
+  points: DataPoint[];
+  color: string;
+};
+
+export type BayesianRegressionState = {
+  points: DataPoint[];
+  meanWeights: [number, number];
+  covariance: [[number, number], [number, number]];
+  meanLine: DataPoint[];
+  upperBand: DataPoint[];
+  lowerBand: DataPoint[];
+  sampleLines: BayesianSampleLine[];
+  noiseVariance: number;
+  priorVariance: number;
+  averageUncertainty: number;
+  xDomain: [number, number];
+  yDomain: [number, number];
+};
+
 export type DeterminantOrientation = "positive" | "negative" | "zero";
 
 export type DeterminantEigenvalue = {
@@ -837,6 +859,7 @@ export type ConceptFrame = {
   svd?: SvdState;
   nmf?: NmfState;
   polynomial?: PolynomialState;
+  bayesianRegression?: BayesianRegressionState;
   determinant?: DeterminantState;
   eigenDirection?: EigenDirectionState;
   regularization?: RegularizationState;
