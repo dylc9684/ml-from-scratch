@@ -1520,7 +1520,8 @@ h1 {
 .control-stack,
 .dataset-panel,
 .education-panel,
-.code-viewer {
+.code-viewer,
+.notebook-panel {
   display: grid;
   gap: 16px;
 }
@@ -2007,6 +2008,49 @@ select {
   line-height: 1.55;
 }
 
+.notebook-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.notebook-header h3 {
+  margin-top: 4px;
+  font-size: 1.08rem;
+  letter-spacing: 0;
+}
+
+.notebook-header p {
+  max-width: 840px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.notebook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.notebook-frame-shell {
+  min-height: 620px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(23, 33, 43, 0.08);
+}
+
+.notebook-frame-shell iframe {
+  display: block;
+  width: 100%;
+  min-height: 620px;
+  border: 0;
+  background: #fff;
+}
+
 .empty-state {
   color: var(--muted);
   padding: 14px;
@@ -2113,6 +2157,7 @@ select {
 
   .stage-header,
   .lesson-guide-header,
+  .notebook-header,
   .secondary-learning-header {
     align-items: flex-start;
     flex-direction: column;
@@ -2200,11 +2245,17 @@ select {
   .visual-shell.dynamic-programming-shell canvas {
     min-height: 860px;
   }
+
+  .notebook-frame-shell,
+  .notebook-frame-shell iframe {
+    min-height: 720px;
+  }
 }
 
 @media (max-width: 480px) {
   .topbar-actions,
-  .dataset-actions {
+  .dataset-actions,
+  .notebook-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -21,6 +21,7 @@ import { EducationPanel } from "./components/EducationPanel";
 import { AlgorithmDeepDive } from "./components/AlgorithmDeepDive";
 import { LessonGuide } from "./components/LessonGuide";
 import { MetricsGrid } from "./components/MetricsGrid";
+import { NotebookPanel } from "./components/NotebookPanel";
 import { ParameterControls } from "./components/ParameterControls";
 import { RealApplicationsPanel } from "./components/RealApplicationsPanel";
 import { VisualizationCanvas } from "./components/VisualizationCanvas";
@@ -33,7 +34,7 @@ import type {
   RawDataset,
 } from "./types/algorithm";
 
-type SecondaryPanel = "map" | "applications" | "data" | "math" | "code" | "deepDive";
+type SecondaryPanel = "map" | "applications" | "data" | "math" | "code" | "notebook" | "deepDive";
 
 export default function App() {
   const [query, setQuery] = useState("");
@@ -371,7 +372,7 @@ export default function App() {
                 <h3>Go deeper when the graph raises a question.</h3>
               </div>
               <div className="secondary-tabbar" role="tablist" aria-label="Lesson study panels">
-                {(["map", "applications", "data", "math", "code", "deepDive"] as SecondaryPanel[]).map((panel) => (
+                {(["map", "applications", "data", "math", "code", "notebook", "deepDive"] as SecondaryPanel[]).map((panel) => (
                   <button
                     key={panel}
                     className={`tab ${activePanel === panel ? "active" : ""}`}
@@ -412,6 +413,13 @@ export default function App() {
                 {activePanel === "code" && (
                   <CodeViewer algorithm={activeAlgorithm} params={params} />
                 )}
+                {activePanel === "notebook" && (
+                  <NotebookPanel
+                    algorithm={activeAlgorithm}
+                    dataset={engineDataset}
+                    params={params}
+                  />
+                )}
                 {activePanel === "deepDive" && (
                   <AlgorithmDeepDive
                     algorithm={activeAlgorithm}
@@ -442,6 +450,9 @@ function panelLabel(panel: SecondaryPanel) {
   }
   if (panel === "code") {
     return "Code";
+  }
+  if (panel === "notebook") {
+    return "Notebook";
   }
   if (panel === "deepDive") {
     return "Deep Dive";

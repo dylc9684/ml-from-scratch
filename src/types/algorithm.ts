@@ -272,6 +272,13 @@ export type LessonApplication = {
   caveat: string;
 };
 
+export type LessonNotebookConfig = {
+  enabled?: boolean;
+  intro?: string;
+  packages?: string[];
+  setupCode?: CodeTemplate;
+};
+
 export type LinearRegressionFrame = {
   type: "linear-regression";
   iteration: number;
@@ -1085,6 +1092,7 @@ export type AlgorithmDefinition = {
   explanation: string[];
   deepDive?: LessonDeepDiveContent;
   applications?: LessonApplication[];
+  notebook?: LessonNotebookConfig;
   code: {
     python: CodeTemplate;
     javascript: CodeTemplate;

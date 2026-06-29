@@ -12,7 +12,7 @@ export type LessonRuntime = Pick<
 
 export type LessonContent = Pick<
   AlgorithmDefinition,
-  "formulas" | "explanation" | "deepDive" | "applications"
+  "formulas" | "explanation" | "deepDive" | "applications" | "notebook"
 >;
 
 export type LessonCode = AlgorithmDefinition["code"];
@@ -53,6 +53,7 @@ export function algorithmToLessonModule(algorithm: AlgorithmDefinition): LessonM
       explanation: algorithm.explanation,
       deepDive: algorithm.deepDive,
       applications: algorithm.applications,
+      notebook: algorithm.notebook,
     },
     code: algorithm.code,
     visualization: {

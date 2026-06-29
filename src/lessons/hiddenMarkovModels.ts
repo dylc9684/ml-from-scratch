@@ -128,6 +128,12 @@ export const hiddenMarkovModelsModule = defineLessonModule({
         caveat: "Use log-probabilities so long sequences do not underflow toward zero.",
       },
     ],
+    notebook: {
+      enabled: true,
+      intro:
+        "Run the Viterbi recurrence in Python and compare the trellis values with the browser animation.",
+      packages: ["numpy"],
+    },
   },
   code: {
     python: (params) => {

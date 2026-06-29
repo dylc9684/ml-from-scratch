@@ -22,7 +22,7 @@ type Props = {
   algorithm: AlgorithmDefinition;
   frame: AlgorithmFrame | null;
   metrics: Metric[];
-  onOpenPanel: (panel: "map" | "applications" | "math" | "code" | "deepDive") => void;
+  onOpenPanel: (panel: "map" | "applications" | "math" | "code" | "notebook" | "deepDive") => void;
 };
 
 export function LessonGuide({ algorithm, frame, metrics, onOpenPanel }: Props) {
@@ -79,6 +79,12 @@ export function LessonGuide({ algorithm, frame, metrics, onOpenPanel }: Props) {
       value: codeSummary,
       icon: Code2,
       onClick: () => onOpenPanel("code"),
+    },
+    {
+      label: "Notebook",
+      value: "Run the Python reference in a browser-side JupyterLite workspace.",
+      icon: Code2,
+      onClick: () => onOpenPanel("notebook"),
     },
     {
       label: "Real-world example",
