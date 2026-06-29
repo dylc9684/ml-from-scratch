@@ -210,6 +210,8 @@ const catalogFilters: Array<{ id: CatalogFilter; label: string }> = [
 
 const recommendedPathIds = [
   "linear-regression",
+  "bayes-rule-visualizer",
+  "gaussian-discriminant-analysis",
   "bayesian-regression",
   "polynomial-features",
   "regularization-and-noise",
@@ -246,6 +248,7 @@ function matchesCatalogFilter(algorithm: AlgorithmDefinition, filter: CatalogFil
 
 const beginnerIds = new Set([
   "linear-regression",
+  "bayes-rule-visualizer",
   "bayesian-regression",
   "logistic-regression",
   "knn-classifier",
@@ -264,6 +267,8 @@ const beginnerCategories = new Set<AlgorithmCategory>([
 ]);
 
 const mathHeavyIds = new Set([
+  "bayes-rule-visualizer",
+  "gaussian-discriminant-analysis",
   "bayesian-regression",
   "singular-value-decomposition",
   "non-negative-matrix-factorization",

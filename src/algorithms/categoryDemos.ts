@@ -348,6 +348,427 @@ function runLogisticRegression(dataset: NormalizedDataset, params: ParameterStat
   );
 }
 
+const defaultGdaPoints = makeDefaultGdaPointSet();
+
+const gaussianDiscriminantAnalysis = makeConceptAlgorithm({
+  id: "gaussian-discriminant-analysis",
+  name: "Gaussian Discriminant Analysis",
+  category: "Logistic Regression & Classification",
+  summary: "Learns Gaussian class profiles and classifies by likelihood ratio.",
+  parameters: [
+    {
+      kind: "point-set",
+      id: "gdaPoints",
+      label: "Class profile points",
+      defaultValue: defaultGdaPoints,
+      maxPoints: 80,
+    },
+    {
+      kind: "select",
+      id: "gdaMode",
+      label: "Discriminant mode",
+      defaultValue: "qda",
+      options: [
+        { label: "QDA: separate covariance", value: "qda" },
+        { label: "LDA: shared covariance", value: "lda" },
+      ],
+    },
+    {
+      kind: "select",
+      id: "gdaClass",
+      label: "Click-to-add class",
+      defaultValue: "red",
+      options: [
+        { label: "Red class", value: "red" },
+        { label: "Blue class", value: "blue" },
+      ],
+    },
+    {
+      kind: "range",
+      id: "gdaTrainingSize",
+      label: "Training Set Size Constraints",
+      min: 4,
+      max: 120,
+      step: 1,
+      defaultValue: 36,
+      format: "integer",
+    },
+  ],
+  sample: () => makeDataset("Generated Gaussian discriminant sample", defaultGdaPoints.points),
+  formulas: [
+    {
+      title: "Gaussian class profile",
+      expression: "p(x|y=k)=\\frac{1}{2\\pi |\\Sigma_k|^{1/2}}e^{-\\frac12(x-\\mu_k)^T\\Sigma_k^{-1}(x-\\mu_k)}",
+    },
+    {
+      title: "Posterior score",
+      expression: "\\hat{y}=\\arg\\max_k \\log \\pi_k + \\log p(x|y=k)",
+    },
+    {
+      title: "LDA vs QDA",
+      expression: "LDA:\\Sigma_k=\\Sigma\\quad QDA:\\Sigma_k\\text{ varies by class}",
+    },
+  ],
+  explanation: [
+    "Gaussian Discriminant Analysis is generative: it profiles how each class could have produced the observed points.",
+    "QDA lets each class keep its own covariance, producing curved boundaries when class shapes differ.",
+    "The training-size slider inflates and fades the contours when data is scarce, making uncertainty visible.",
+  ],
+  engine: (_, params) => {
+    const mode = stringParam(params, "gdaMode", "qda") === "lda" ? "lda" : "qda";
+    const activeClass = stringParam(params, "gdaClass", "red") === "blue" ? "blue" : "red";
+    const trainingSize = Math.round(numberParam(params, "gdaTrainingSize", 36));
+    const points = pointSetParam(params, "gdaPoints", defaultGdaPoints, 80).points;
+    const usablePoints = hasBothGdaClasses(points) ? points : defaultGdaPoints.points;
+    const gda = computeGdaState(usablePoints, mode, activeClass, trainingSize);
+    const red = gda.profiles.find((profile) => profile.classKey === "red");
+    const blue = gda.profiles.find((profile) => profile.classKey === "blue");
+
+    return conceptResult(
+      {
+        type: "concept-demo",
+        iteration: trainingSize,
+        points: gda.points,
+        gda,
+        summary: `${mode.toUpperCase()} · accuracy ${metricValue(gda.accuracy)} · uncertainty ${(gda.uncertainty * 100).toFixed(0)}%`,
+      },
+      [
+        { label: "Mode", value: mode.toUpperCase() },
+        { label: "Accuracy", value: metricValue(gda.accuracy) },
+        { label: "Red det", value: red ? red.determinant.toFixed(2) : "0" },
+        { label: "Blue det", value: blue ? blue.determinant.toFixed(2) : "0" },
+      ],
+    );
+  },
+  python: (params) => {
+    const mode = stringParam(params, "gdaMode", "qda") === "lda" ? "lda" : "qda";
+
+    return `import numpy as np
+
+mode = "${mode}"
+classes = np.unique(y)
+profiles = {}
+
+for klass in classes:
+    Xk = X[y == klass]
+    mu = Xk.mean(axis=0)
+    centered = Xk - mu
+    cov = centered.T @ centered / max(1, len(Xk) - 1)
+    profiles[klass] = {"mu": mu, "cov": cov, "prior": len(Xk) / len(X)}
+
+if mode == "lda":
+    pooled = sum((X[y == k].shape[0] - 1) * profiles[k]["cov"] for k in classes)
+    pooled /= max(1, len(X) - len(classes))
+    for klass in classes:
+        profiles[klass]["cov"] = pooled
+
+def log_gaussian(x, mu, cov):
+    cov = cov + 1e-4 * np.eye(cov.shape[0])
+    inv = np.linalg.inv(cov)
+    det = np.linalg.det(cov)
+    diff = x - mu
+    return -0.5 * (np.log(det) + diff.T @ inv @ diff)
+
+scores = [
+    np.log(profile["prior"]) + log_gaussian(query, profile["mu"], profile["cov"])
+    for profile in profiles.values()
+]`;
+  },
+  javascript: (params) => {
+    const mode = stringParam(params, "gdaMode", "qda") === "lda" ? "lda" : "qda";
+
+    return `const mode = "${mode}";
+const classes = ["red", "blue"];
+const profiles = classes.map((klass) => {
+  const group = points.filter((point) => point.label === klass);
+  const mean = mean2D(group);
+  const covariance = covariance2D(group, mean);
+  return { klass, mean, covariance, prior: group.length / points.length };
+});
+
+if (mode === "lda") {
+  const pooled = pooledCovariance(profiles, points.length);
+  profiles.forEach((profile) => { profile.covariance = pooled; });
+}
+
+function logGaussian(point, profile) {
+  const cov = addRidge(profile.covariance, 1e-4);
+  const inv = invert2x2(cov);
+  const det = determinant2x2(cov);
+  const dx = point.x - profile.mean.x;
+  const dy = point.y - profile.mean.y;
+  const quad = dx * (inv[0][0] * dx + inv[0][1] * dy)
+    + dy * (inv[1][0] * dx + inv[1][1] * dy);
+  return Math.log(profile.prior) - 0.5 * (Math.log(det) + quad);
+}
+
+const scores = profiles.map((profile) => logGaussian(query, profile));
+const prediction = scores[1] > scores[0] ? "blue" : "red";`;
+  },
+});
+
+function makeDefaultGdaPointSet() {
+  const red = Array.from({ length: 16 }, (_, index) => {
+    const angle = index * 0.78;
+    const radius = 0.38 + (index % 5) * 0.14;
+    const x = -1.45 + Math.cos(angle) * radius * 1.25 + Math.sin(angle) * 0.28;
+    const y = -0.65 + Math.sin(angle) * radius * 0.62 + Math.cos(angle) * 0.22;
+    return { x: round(x), y: round(y), label: "red" };
+  });
+  const blue = Array.from({ length: 16 }, (_, index) => {
+    const angle = index * 0.71 + 0.4;
+    const radius = 0.42 + (index % 6) * 0.13;
+    const x = 1.25 + Math.cos(angle) * radius * 0.74 - Math.sin(angle) * 0.2;
+    const y = 0.82 + Math.sin(angle) * radius * 1.28 + Math.cos(angle) * 0.26;
+    return { x: round(x), y: round(y), label: "blue" };
+  });
+
+  return {
+    kind: "point-set" as const,
+    points: [...red, ...blue],
+  };
+}
+
+function hasBothGdaClasses(points: DataPoint[]) {
+  return points.some((point) => gdaClassKey(point) === "red") && points.some((point) => gdaClassKey(point) === "blue");
+}
+
+function computeGdaState(
+  points: DataPoint[],
+  mode: "lda" | "qda",
+  activeClass: "red" | "blue",
+  trainingSize: number,
+) {
+  const normalizedPoints = points.map((point) => ({
+    x: point.x,
+    y: point.y,
+    label: gdaClassKey(point),
+  }));
+  const confidence = bounded((trainingSize - 4) / 116, 0, 1);
+  const uncertainty = 1 - confidence;
+  const rawProfiles = ["red", "blue"].map((classKey) => {
+    const classPoints = normalizedPoints.filter((point) => point.label === classKey);
+    const meanPoint = mean(classPoints.length > 0 ? classPoints : normalizedPoints);
+    const covariance = covarianceForPoints(classPoints, meanPoint);
+    return {
+      classKey: classKey as "red" | "blue",
+      label: classKey === "red" ? "Red class" : "Blue class",
+      color: classKey === "red" ? "#d34a43" : "#2f6fbe",
+      mean: meanPoint,
+      rawCovariance: covariance,
+      prior: classPoints.length / Math.max(1, normalizedPoints.length),
+      count: classPoints.length,
+    };
+  });
+  const pooledCovariance = pooledGdaCovariance(rawProfiles, normalizedPoints.length);
+  const inflation = 1 + uncertainty ** 2 * 3.6;
+  const ridge = 0.035 + uncertainty * 0.2;
+  const baseProfiles = rawProfiles.map((profile) => {
+    const covariance = regularizeGdaCovariance(mode === "lda" ? pooledCovariance : profile.rawCovariance, inflation, ridge);
+    const inverse = invertGda2x2(covariance);
+    const determinant = determinantGda2x2(covariance);
+    return {
+      classKey: profile.classKey,
+      label: profile.label,
+      color: profile.color,
+      mean: profile.mean,
+      covariance,
+      inverse,
+      determinant,
+      prior: profile.prior,
+      count: profile.count,
+      contours: [] as DataPoint[][],
+    };
+  });
+  const profiles = baseProfiles.map((profile) => ({
+    ...profile,
+    contours: makeGdaContours(profile.mean, profile.covariance),
+  }));
+  const contourPoints = profiles.flatMap((profile) => profile.contours.flat());
+  const xValues = [...normalizedPoints.map((point) => point.x), ...contourPoints.map((point) => point.x), -4, 4];
+  const yValues = [...normalizedPoints.map((point) => point.y), ...contourPoints.map((point) => point.y), -4, 4];
+  const xDomain = expandDomain(Math.min(...xValues), Math.max(...xValues), 0.08);
+  const yDomain = expandDomain(Math.min(...yValues), Math.max(...yValues), 0.08);
+  const decisionGrid = makeGdaDecisionGrid(profiles, xDomain, yDomain);
+  const accuracy =
+    normalizedPoints.filter((point) => classifyGdaPoint(point, profiles).predicted === point.label).length /
+    Math.max(1, normalizedPoints.length);
+
+  return {
+    mode,
+    activeClass,
+    trainingSize,
+    confidence,
+    uncertainty,
+    points: normalizedPoints,
+    profiles,
+    decisionGrid,
+    accuracy,
+    xDomain,
+    yDomain,
+  };
+}
+
+function gdaClassKey(point: DataPoint): "red" | "blue" {
+  return point.label === "blue" || point.label === 1 || point.label === "positive" ? "blue" : "red";
+}
+
+function covarianceForPoints(points: DataPoint[], center: DataPoint): [[number, number], [number, number]] {
+  if (points.length < 2) {
+    return [
+      [0.55, 0],
+      [0, 0.55],
+    ];
+  }
+
+  const scale = 1 / Math.max(1, points.length - 1);
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  points.forEach((point) => {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    xx += dx * dx;
+    xy += dx * dy;
+    yy += dy * dy;
+  });
+
+  return [
+    [xx * scale, xy * scale],
+    [xy * scale, yy * scale],
+  ];
+}
+
+function pooledGdaCovariance(
+  profiles: Array<{ rawCovariance: [[number, number], [number, number]]; count: number }>,
+  totalCount: number,
+): [[number, number], [number, number]] {
+  const denominator = Math.max(1, totalCount - profiles.length);
+  const pooled: [[number, number], [number, number]] = [
+    [0, 0],
+    [0, 0],
+  ];
+  profiles.forEach((profile) => {
+    const weight = Math.max(1, profile.count - 1);
+    pooled[0][0] += profile.rawCovariance[0][0] * weight;
+    pooled[0][1] += profile.rawCovariance[0][1] * weight;
+    pooled[1][0] += profile.rawCovariance[1][0] * weight;
+    pooled[1][1] += profile.rawCovariance[1][1] * weight;
+  });
+
+  return [
+    [pooled[0][0] / denominator, pooled[0][1] / denominator],
+    [pooled[1][0] / denominator, pooled[1][1] / denominator],
+  ];
+}
+
+function regularizeGdaCovariance(
+  covariance: [[number, number], [number, number]],
+  inflation: number,
+  ridge: number,
+): [[number, number], [number, number]] {
+  return [
+    [covariance[0][0] * inflation + ridge, covariance[0][1] * inflation],
+    [covariance[1][0] * inflation, covariance[1][1] * inflation + ridge],
+  ];
+}
+
+function makeGdaContours(meanPoint: DataPoint, covariance: [[number, number], [number, number]]) {
+  const eig = eigenSymmetric2x2(covariance);
+  const levels = [0.8, 1.25, 1.75, 2.35];
+
+  return levels.map((level) =>
+    Array.from({ length: 96 }, (_, index) => {
+      const angle = (index / 95) * Math.PI * 2;
+      const localX = Math.cos(angle) * Math.sqrt(Math.max(0.001, eig.lambda1)) * level;
+      const localY = Math.sin(angle) * Math.sqrt(Math.max(0.001, eig.lambda2)) * level;
+      const rotatedX = Math.cos(eig.angle) * localX - Math.sin(eig.angle) * localY;
+      const rotatedY = Math.sin(eig.angle) * localX + Math.cos(eig.angle) * localY;
+      return {
+        x: meanPoint.x + rotatedX,
+        y: meanPoint.y + rotatedY,
+        label: "contour",
+      };
+    }),
+  );
+}
+
+function eigenSymmetric2x2(matrix: [[number, number], [number, number]]) {
+  const a = matrix[0][0];
+  const b = matrix[0][1];
+  const c = matrix[1][1];
+  const center = (a + c) / 2;
+  const radius = Math.sqrt(((a - c) / 2) ** 2 + b ** 2);
+
+  return {
+    lambda1: Math.max(0.001, center + radius),
+    lambda2: Math.max(0.001, center - radius),
+    angle: 0.5 * Math.atan2(2 * b, a - c),
+  };
+}
+
+function makeGdaDecisionGrid(
+  profiles: NonNullable<ConceptFrame["gda"]>["profiles"],
+  xDomain: [number, number],
+  yDomain: [number, number],
+) {
+  const columns = 38;
+  const rows = 28;
+  return Array.from({ length: columns * rows }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = xDomain[0] + ((column + 0.5) / columns) * (xDomain[1] - xDomain[0]);
+    const y = yDomain[0] + ((row + 0.5) / rows) * (yDomain[1] - yDomain[0]);
+    const result = classifyGdaPoint({ x, y }, profiles);
+    return {
+      x,
+      y,
+      posteriorBlue: result.posteriorBlue,
+      predicted: result.predicted,
+      margin: Math.abs(result.posteriorBlue - 0.5) * 2,
+    };
+  });
+}
+
+function classifyGdaPoint(
+  point: Pick<DataPoint, "x" | "y">,
+  profiles: NonNullable<ConceptFrame["gda"]>["profiles"],
+) {
+  const red = profiles.find((profile) => profile.classKey === "red") ?? profiles[0];
+  const blue = profiles.find((profile) => profile.classKey === "blue") ?? profiles[1] ?? profiles[0];
+  const redScore = gdaLogScore(point, red);
+  const blueScore = gdaLogScore(point, blue);
+  const posteriorBlue = 1 / (1 + Math.exp(Math.max(-40, Math.min(40, redScore - blueScore))));
+  return {
+    posteriorBlue,
+    predicted: posteriorBlue >= 0.5 ? ("blue" as const) : ("red" as const),
+  };
+}
+
+function gdaLogScore(
+  point: Pick<DataPoint, "x" | "y">,
+  profile: NonNullable<ConceptFrame["gda"]>["profiles"][number],
+) {
+  const dx = point.x - profile.mean.x;
+  const dy = point.y - profile.mean.y;
+  const inverseDx = profile.inverse[0][0] * dx + profile.inverse[0][1] * dy;
+  const inverseDy = profile.inverse[1][0] * dx + profile.inverse[1][1] * dy;
+  const quadratic = dx * inverseDx + dy * inverseDy;
+  return Math.log(Math.max(1e-6, profile.prior)) - 0.5 * (Math.log(Math.max(1e-6, profile.determinant)) + quadratic);
+}
+
+function determinantGda2x2(matrix: [[number, number], [number, number]]) {
+  return Math.max(1e-6, matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]);
+}
+
+function invertGda2x2(matrix: [[number, number], [number, number]]): [[number, number], [number, number]] {
+  const determinant = determinantGda2x2(matrix);
+  return [
+    [matrix[1][1] / determinant, -matrix[0][1] / determinant],
+    [-matrix[1][0] / determinant, matrix[0][0] / determinant],
+  ];
+}
+
 const decisionTreeSplit = makeConceptAlgorithm({
   id: "decision-tree-split",
   name: "Decision Tree Split",
@@ -923,7 +1344,7 @@ function makeDefaultBayesianPointSet() {
   };
 }
 
-function pointSetParam(params: ParameterState, key: string, fallback: typeof defaultPolynomialPoints) {
+function pointSetParam(params: ParameterState, key: string, fallback: typeof defaultPolynomialPoints, maxPoints = 42) {
   const value = params[key];
   if (
     typeof value === "object" &&
@@ -941,7 +1362,7 @@ function pointSetParam(params: ParameterState, key: string, fallback: typeof def
           label: point.label,
         }))
         .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-        .slice(0, 42),
+        .slice(0, maxPoints),
     };
   }
 
@@ -2110,6 +2531,243 @@ model.predict_proba(query)`,
 const prior = ${numberParam(params, "positivePrior", 0.5).toFixed(2)};
 const posterior = normalize(prior * likelihoods.map((p) => smooth(p, alpha)));`,
 });
+
+const bayesRuleVisualizer = makeConceptAlgorithm({
+  id: "bayes-rule-visualizer",
+  name: "Bayes' Rule Visualizer",
+  category: "Naive Bayes",
+  summary: "Shows posterior probability as useful evidence divided by all evidence.",
+  parameters: [
+    {
+      kind: "range",
+      id: "bayesPrior",
+      label: "Prior P(A)",
+      min: 0.01,
+      max: 0.8,
+      step: 0.01,
+      defaultValue: 0.2,
+      format: "percent",
+    },
+    {
+      kind: "range",
+      id: "bayesSensitivity",
+      label: "Sensitivity P(B|A)",
+      min: 0.05,
+      max: 0.99,
+      step: 0.01,
+      defaultValue: 0.85,
+      format: "percent",
+    },
+    {
+      kind: "range",
+      id: "bayesFalsePositive",
+      label: "False positive P(B|not A)",
+      min: 0.01,
+      max: 0.6,
+      step: 0.01,
+      defaultValue: 0.1,
+      format: "percent",
+    },
+  ],
+  sample: makeBayesRuleDataset,
+  controller: {
+    primaryActionLabel: "Animate",
+  },
+  formulas: [
+    {
+      title: "Bayes' rule",
+      expression: "P(A|B)=\\frac{P(B|A)P(A)}{P(B)}",
+    },
+    {
+      title: "Total evidence",
+      expression: "P(B)=P(B|A)P(A)+P(B|\\neg A)P(\\neg A)",
+    },
+    {
+      title: "Default example",
+      expression: "P(A|B)=\\frac{0.85\\cdot0.20}{0.25}=0.68",
+    },
+  ],
+  explanation: [
+    "The posterior is the share of positive evidence that comes from actual positives.",
+    "A strong test can still produce a modest posterior when the prior is rare, because false positives may dominate the positive-test group.",
+    "The frequency grid translates probabilities into people so the denominator is visible instead of abstract.",
+  ],
+  engine: (_, params) => {
+    const prior = bounded(numberParam(params, "bayesPrior", 0.2), 0.01, 0.8);
+    const sensitivity = bounded(numberParam(params, "bayesSensitivity", 0.85), 0.05, 0.99);
+    const falsePositiveRate = bounded(numberParam(params, "bayesFalsePositive", 0.1), 0.01, 0.6);
+    const frameCount = 32;
+    const frames = Array.from({ length: frameCount }, (_, index) => {
+      const progress = index / Math.max(1, frameCount - 1);
+      const state = computeBayesRuleState(prior, sensitivity, falsePositiveRate, progress);
+
+      return {
+        type: "concept-demo" as const,
+        iteration: index + 1,
+        points: makeBayesRuleDataset().points,
+        bayesRule: state,
+        summary: `Posterior ${(state.posterior * 100).toFixed(1)}% · useful ${(state.usefulEvidence * 100).toFixed(1)}% / evidence ${(state.evidence * 100).toFixed(1)}%`,
+      };
+    });
+    const state = computeBayesRuleState(prior, sensitivity, falsePositiveRate, 1);
+
+    return {
+      frames,
+      runtime: "JavaScript",
+      metrics: [
+        { label: "P(A|B)", value: `${(state.posterior * 100).toFixed(1)}%` },
+        { label: "P(B)", value: `${(state.evidence * 100).toFixed(1)}%` },
+        { label: "Useful evidence", value: `${(state.usefulEvidence * 100).toFixed(1)}%` },
+        { label: "Positive tests", value: `${state.counts.positiveTests}/${state.population}` },
+      ],
+    };
+  },
+  python: (params) => {
+    const prior = numberParam(params, "bayesPrior", 0.2).toFixed(2);
+    const sensitivity = numberParam(params, "bayesSensitivity", 0.85).toFixed(2);
+    const falsePositiveRate = numberParam(params, "bayesFalsePositive", 0.1).toFixed(2);
+
+    return `prior = ${prior}                 # P(A)
+sensitivity = ${sensitivity}           # P(B | A)
+false_positive = ${falsePositiveRate}  # P(B | not A)
+
+useful_evidence = sensitivity * prior
+total_evidence = useful_evidence + false_positive * (1 - prior)
+posterior = useful_evidence / total_evidence
+
+population = 1000
+actual_positive = round(population * prior)
+actual_negative = population - actual_positive
+true_positive = round(actual_positive * sensitivity)
+false_negative = actual_positive - true_positive
+false_positive_count = round(actual_negative * false_positive)
+true_negative = actual_negative - false_positive_count
+
+print(posterior, true_positive, false_positive_count)`;
+  },
+  javascript: (params) => {
+    const prior = numberParam(params, "bayesPrior", 0.2).toFixed(2);
+    const sensitivity = numberParam(params, "bayesSensitivity", 0.85).toFixed(2);
+    const falsePositiveRate = numberParam(params, "bayesFalsePositive", 0.1).toFixed(2);
+
+    return `const prior = ${prior};                 // P(A)
+const sensitivity = ${sensitivity};           // P(B | A)
+const falsePositive = ${falsePositiveRate};   // P(B | not A)
+
+const usefulEvidence = sensitivity * prior;
+const totalEvidence = usefulEvidence + falsePositive * (1 - prior);
+const posterior = usefulEvidence / totalEvidence;
+
+const population = 1000;
+const actualPositive = Math.round(population * prior);
+const actualNegative = population - actualPositive;
+const truePositive = Math.round(actualPositive * sensitivity);
+const falseNegative = actualPositive - truePositive;
+const falsePositiveCount = Math.round(actualNegative * falsePositive);
+const trueNegative = actualNegative - falsePositiveCount;
+
+console.log({ posterior, truePositive, falsePositiveCount, trueNegative });`;
+  },
+});
+
+function makeBayesRuleDataset() {
+  return makeDataset("Bayes rule 1,000-person frequency model", [{ x: 0, y: 0, label: "population" }]);
+}
+
+function computeBayesRuleState(
+  prior: number,
+  sensitivity: number,
+  falsePositiveRate: number,
+  animationProgress: number,
+) {
+  const population = 1000;
+  const usefulEvidence = sensitivity * prior;
+  const evidence = usefulEvidence + falsePositiveRate * (1 - prior);
+  const posterior = evidence > 0 ? usefulEvidence / evidence : 0;
+  const actualPositive = Math.round(population * prior);
+  const actualNegative = population - actualPositive;
+  const truePositive = Math.round(actualPositive * sensitivity);
+  const falseNegative = actualPositive - truePositive;
+  const falsePositive = Math.round(actualNegative * falsePositiveRate);
+  const trueNegative = actualNegative - falsePositive;
+  const positiveTests = truePositive + falsePositive;
+  const negativeTests = falseNegative + trueNegative;
+  const phase: NonNullable<ConceptFrame["bayesRule"]>["phase"] =
+    animationProgress < 0.34
+      ? "population"
+      : animationProgress < 0.68
+        ? "positive-tests"
+        : "actual-positives";
+  const phaseProgress =
+    phase === "population"
+      ? animationProgress / 0.34
+      : phase === "positive-tests"
+        ? (animationProgress - 0.34) / 0.34
+        : (animationProgress - 0.68) / 0.32;
+
+  return {
+    prior,
+    sensitivity,
+    falsePositiveRate,
+    evidence,
+    usefulEvidence,
+    posterior,
+    population,
+    counts: {
+      actualPositive,
+      actualNegative,
+      truePositive,
+      falsePositive,
+      falseNegative,
+      trueNegative,
+      positiveTests,
+      negativeTests,
+    },
+    cells: makeBayesRuleCells(truePositive, falseNegative, falsePositive, trueNegative),
+    phase,
+    phaseProgress: bounded(phaseProgress, 0, 1),
+  };
+}
+
+function bounded(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function makeBayesRuleCells(
+  truePositive: number,
+  falseNegative: number,
+  falsePositive: number,
+  trueNegative: number,
+) {
+  const cells = [
+    ...Array.from({ length: truePositive }, (_, index) => ({
+      id: index,
+      status: "true-positive" as const,
+      actualPositive: true,
+      testPositive: true,
+    })),
+    ...Array.from({ length: falseNegative }, (_, index) => ({
+      id: truePositive + index,
+      status: "false-negative" as const,
+      actualPositive: true,
+      testPositive: false,
+    })),
+    ...Array.from({ length: falsePositive }, (_, index) => ({
+      id: truePositive + falseNegative + index,
+      status: "false-positive" as const,
+      actualPositive: false,
+      testPositive: true,
+    })),
+    ...Array.from({ length: trueNegative }, (_, index) => ({
+      id: truePositive + falseNegative + falsePositive + index,
+      status: "true-negative" as const,
+      actualPositive: false,
+      testPositive: false,
+    })),
+  ];
+
+  return cells.slice(0, 1000);
+}
 
 const anomalyDetection = makeConceptAlgorithm({
   id: "anomaly-detection",
@@ -7952,6 +8610,7 @@ function makeTimeSeriesDataset() {
 
 export const categoryDemos: AlgorithmDefinition[] = [
   logisticRegression,
+  gaussianDiscriminantAnalysis,
   decisionTreeSplit,
   supportVectorMachine,
   knnClassifier,
@@ -7964,6 +8623,7 @@ export const categoryDemos: AlgorithmDefinition[] = [
   hyperparameterTuning,
   regularizationAndNoise,
   naiveBayes,
+  bayesRuleVisualizer,
   anomalyDetection,
   imbalancedData,
   timeSeries,

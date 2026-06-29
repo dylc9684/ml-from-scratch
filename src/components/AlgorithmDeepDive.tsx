@@ -228,6 +228,69 @@ const deepDiveById: Record<string, DeepDiveContent> = {
       "Feature scaling makes gradient descent smoother and easier to tune.",
     ],
   },
+  "bayes-rule-visualizer": {
+    graphTitle: "What the grid and tree are showing",
+    graphNotes: [
+      "The grid turns probabilities into 1,000 concrete people so the denominator is visible.",
+      "The positive-test group contains both true positives and false positives; the posterior is the true-positive share of that group.",
+      "Changing the prior often moves the posterior more than people expect, especially for rare events.",
+    ],
+    complexity: {
+      time: "O(n) to render a frequency grid with n people; the probability update itself is O(1).",
+      prediction: "O(1) for one posterior calculation.",
+      space: "O(n) for the displayed people, or O(1) if you keep only the counts.",
+      plainEnglish:
+        "Bayes' Rule is just a few multiplications and a division. The visual grid costs more than the math because it draws every person.",
+      terms: [
+        { label: "people n", weight: 64 },
+        { label: "posterior O(1)", weight: 86 },
+        { label: "false positives", weight: 72 },
+      ],
+    },
+    realWorld: [
+      "Medical screening, where a positive test can still be uncertain if the condition is rare.",
+      "Fraud and security alerts, where most flagged events may be false positives unless the base rate is high enough.",
+      "Spam, moderation, and monitoring systems that need calibrated confidence after evidence arrives.",
+    ],
+    keyDetails: [
+      "P(A) is the prior: what you believed before seeing the evidence.",
+      "P(B|A) is sensitivity: how often evidence appears when A is truly present.",
+      "P(B|not A) is the false positive rate: how often evidence appears even when A is absent.",
+      "Posterior means useful evidence divided by all evidence, not just test accuracy.",
+    ],
+  },
+  "gaussian-discriminant-analysis": {
+    graphTitle: "What the contours are showing",
+    graphNotes: [
+      "Each ring is a constant-density contour from a learned 2D Gaussian profile for one class.",
+      "Dragging the training-size constraint low inflates and fades the contours, representing uncertainty in the estimated mean and covariance.",
+      "LDA shares one covariance shape across classes; QDA lets each class stretch and rotate independently, which can bend the boundary.",
+    ],
+    complexity: {
+      time: "Fitting is O(n d^2 + k d^3); drawing the probability grid adds O(g k d^2).",
+      prediction: "O(k d^2) per point because each class evaluates a quadratic Gaussian score.",
+      space: "O(k d^2) for class covariance matrices plus O(g) for the rendered grid.",
+      plainEnglish:
+        "With two features this is tiny. The expensive part in the playground is drawing many background cells, not inverting 2 by 2 matrices.",
+      terms: [
+        { label: "samples n", weight: 68 },
+        { label: "features d", weight: 72 },
+        { label: "classes k", weight: 58 },
+        { label: "grid cells g", weight: 64 },
+      ],
+    },
+    realWorld: [
+      "Sensor classification where each machine state has a characteristic cloud of readings.",
+      "Medical or biological screening when class-conditional measurements are roughly bell-shaped.",
+      "Fast client-side routing when a small probabilistic classifier must score streaming points without a backend.",
+    ],
+    keyDetails: [
+      "GDA is generative: it models p(x|class) and then uses Bayes' Rule to classify.",
+      "QDA is more flexible but needs more data because every class gets its own covariance matrix.",
+      "LDA is more stable with small data because it shares one covariance matrix across classes.",
+      "Poorly estimated covariance can overfit or become singular, so production systems often add shrinkage or a ridge term.",
+    ],
+  },
   "bayesian-regression": {
     graphTitle: "What the band and sampled lines are showing",
     graphNotes: [

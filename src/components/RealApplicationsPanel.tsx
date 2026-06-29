@@ -97,6 +97,46 @@ function makeApplicationCards(
 }
 
 function applicationTemplates(algorithm: AlgorithmDefinition) {
+  if (algorithm.id === "gaussian-discriminant-analysis") {
+    return [
+      {
+        title: "Sensor-state routing",
+        data: "Two or more continuous readings from devices, vehicles, or industrial equipment",
+        action: "Route each new point to the class whose Gaussian profile most likely produced it",
+      },
+      {
+        title: "Clinical measurement screening",
+        data: "Lab measurements, biomarkers, or imaging-derived numeric features",
+        action: "Estimate class likelihoods while tracking uncertainty from small samples",
+      },
+      {
+        title: "Client-side probabilistic triage",
+        data: "Small feature vectors arriving in a browser, edge device, or dashboard",
+        action: "Score likely classes without waiting for backend inference",
+      },
+    ];
+  }
+
+  if (algorithm.id === "bayes-rule-visualizer") {
+    return [
+      {
+        title: "Medical screening",
+        data: "Condition prevalence, test sensitivity, and false-positive rate",
+        action: "Estimate the chance a positive result means the condition is truly present",
+      },
+      {
+        title: "Fraud alerts",
+        data: "Base fraud rate, detection rate, and normal-transaction false alarms",
+        action: "Rank alerts by posterior risk instead of raw detector confidence",
+      },
+      {
+        title: "Content moderation",
+        data: "Policy violation prevalence, classifier recall, and false-positive rate",
+        action: "Decide which positive flags need automated action or human review",
+      },
+    ];
+  }
+
   if (algorithm.id === "bayesian-regression") {
     return [
       {

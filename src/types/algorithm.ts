@@ -634,6 +634,83 @@ export type BayesianRegressionState = {
   yDomain: [number, number];
 };
 
+export type BayesRulePhase = "population" | "positive-tests" | "actual-positives";
+
+export type BayesRuleCellStatus =
+  | "true-positive"
+  | "false-positive"
+  | "false-negative"
+  | "true-negative";
+
+export type BayesRuleCell = {
+  id: number;
+  status: BayesRuleCellStatus;
+  actualPositive: boolean;
+  testPositive: boolean;
+};
+
+export type BayesRuleState = {
+  prior: number;
+  sensitivity: number;
+  falsePositiveRate: number;
+  evidence: number;
+  usefulEvidence: number;
+  posterior: number;
+  population: number;
+  counts: {
+    actualPositive: number;
+    actualNegative: number;
+    truePositive: number;
+    falsePositive: number;
+    falseNegative: number;
+    trueNegative: number;
+    positiveTests: number;
+    negativeTests: number;
+  };
+  cells: BayesRuleCell[];
+  phase: BayesRulePhase;
+  phaseProgress: number;
+};
+
+export type GdaMode = "lda" | "qda";
+
+export type GdaClassKey = "red" | "blue";
+
+export type GdaDecisionCell = {
+  x: number;
+  y: number;
+  posteriorBlue: number;
+  predicted: GdaClassKey;
+  margin: number;
+};
+
+export type GdaClassProfile = {
+  classKey: GdaClassKey;
+  label: string;
+  color: string;
+  mean: DataPoint;
+  covariance: [[number, number], [number, number]];
+  inverse: [[number, number], [number, number]];
+  determinant: number;
+  prior: number;
+  count: number;
+  contours: DataPoint[][];
+};
+
+export type GdaState = {
+  mode: GdaMode;
+  activeClass: GdaClassKey;
+  trainingSize: number;
+  confidence: number;
+  uncertainty: number;
+  points: DataPoint[];
+  profiles: GdaClassProfile[];
+  decisionGrid: GdaDecisionCell[];
+  accuracy: number;
+  xDomain: [number, number];
+  yDomain: [number, number];
+};
+
 export type DeterminantOrientation = "positive" | "negative" | "zero";
 
 export type DeterminantEigenvalue = {
@@ -860,6 +937,8 @@ export type ConceptFrame = {
   nmf?: NmfState;
   polynomial?: PolynomialState;
   bayesianRegression?: BayesianRegressionState;
+  bayesRule?: BayesRuleState;
+  gda?: GdaState;
   determinant?: DeterminantState;
   eigenDirection?: EigenDirectionState;
   regularization?: RegularizationState;

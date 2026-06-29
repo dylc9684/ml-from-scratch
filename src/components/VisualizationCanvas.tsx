@@ -58,6 +58,8 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
   const isNmfLesson = frame?.type === "concept-demo" && Boolean(frame.nmf);
   const isPolynomialLesson = frame?.type === "concept-demo" && Boolean(frame.polynomial);
   const isBayesianRegressionLesson = frame?.type === "concept-demo" && Boolean(frame.bayesianRegression);
+  const isBayesRuleLesson = frame?.type === "concept-demo" && Boolean(frame.bayesRule);
+  const isGdaLesson = frame?.type === "concept-demo" && Boolean(frame.gda);
   const isDeterminantLesson = frame?.type === "concept-demo" && Boolean(frame.determinant);
   const isEigenDirectionLesson = frame?.type === "concept-demo" && Boolean(frame.eigenDirection);
   const isRegularizationLesson = frame?.type === "concept-demo" && Boolean(frame.regularization);
@@ -98,7 +100,7 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       frame?.type !== "concept-demo" ||
       !params ||
       !onParamChange ||
-      (!frame.dynamicProgramming && !frame.polynomial && !frame.bayesianRegression)
+      (!frame.dynamicProgramming && !frame.polynomial && !frame.bayesianRegression && !frame.gda)
     ) {
       return;
     }
@@ -148,6 +150,25 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
           : { kind: "point-set" as const, points: frame.bayesianRegression.points };
       const nextPoints = [...currentPointSet.points, { ...nextPoint, label: "custom" }].slice(-42);
       onParamChange("bayesianPoints", { kind: "point-set", points: nextPoints });
+      return;
+    }
+
+    if (frame.gda) {
+      const nextPoint = canvasPointToGdaPoint(frame.gda, size, point);
+      if (!nextPoint) {
+        return;
+      }
+
+      const nextClass = params.gdaClass === "blue" ? "blue" : "red";
+      const currentPointSet =
+        typeof params.gdaPoints === "object" &&
+        params.gdaPoints !== null &&
+        "kind" in params.gdaPoints &&
+        params.gdaPoints.kind === "point-set"
+          ? params.gdaPoints
+          : { kind: "point-set" as const, points: frame.gda.points };
+      const nextPoints = [...currentPointSet.points, { ...nextPoint, label: nextClass }].slice(-80);
+      onParamChange("gdaPoints", { kind: "point-set", points: nextPoints });
       return;
     }
 
@@ -283,6 +304,10 @@ export function VisualizationCanvas({ frame, algorithm, params, onParamChange }:
       } ${
         isBayesianRegressionLesson ? "bayesian-regression-shell" : ""
       } ${
+        isBayesRuleLesson ? "bayes-rule-shell" : ""
+      } ${
+        isGdaLesson ? "gda-shell" : ""
+      } ${
         isDeterminantLesson ? "determinant-shell" : ""
       } ${
         isEigenDirectionLesson ? "eigen-direction-shell" : ""
@@ -402,6 +427,16 @@ function draw(
 
   if (frame.type === "concept-demo" && frame.bayesianRegression) {
     paintBayesianRegressionLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.bayesRule) {
+    paintBayesRuleLesson(context, frame, size);
+    return;
+  }
+
+  if (frame.type === "concept-demo" && frame.gda) {
+    paintGdaLesson(context, frame, size);
     return;
   }
 
@@ -2940,6 +2975,788 @@ function canvasPointToPolynomialPoint(
 ) {
   const { plotPane } = polynomialLayout(size);
   const { plot, x, y } = polynomialScales(polynomial, plotPane);
+  if (
+    point.x < plot.x ||
+    point.x > plot.x + plot.width ||
+    point.y < plot.y ||
+    point.y > plot.y + plot.height
+  ) {
+    return null;
+  }
+
+  return {
+    x: Number(x.invert(point.x).toFixed(3)),
+    y: Number(y.invert(point.y).toFixed(3)),
+  };
+}
+
+function paintBayesRuleLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const bayesRule = frame.bayesRule;
+  if (!bayesRule) {
+    return;
+  }
+
+  const layout = bayesRuleLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Frequency filtering", layout.gridPane.x, layout.gridPane.y - 24);
+  context.fillText("Formula and probability tree", layout.treePane.x, layout.treePane.y - 24);
+
+  paintBayesRuleGrid(context, bayesRule, layout.gridPane);
+  paintBayesRuleTreePanel(context, bayesRule, layout.treePane);
+}
+
+function bayesRuleLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const gridPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(380, size.height * 0.56) }
+    : { x: padding, y: 58, width: Math.max(500, size.width * 0.6), height: size.height - 96 };
+  const treePane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: gridPane.y + gridPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(330, size.height - gridPane.height - 120),
+      }
+    : {
+        x: gridPane.x + gridPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - gridPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { gridPane, treePane };
+}
+
+function paintBayesRuleGrid(
+  context: CanvasRenderingContext2D,
+  bayesRule: NonNullable<ConceptFrame["bayesRule"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("1,000 people: where the positive tests come from", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `${bayesRule.counts.truePositive} true positives + ${bayesRule.counts.falsePositive} false positives = ${bayesRule.counts.positiveTests} positive tests`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const grid = bayesRuleGridArea(pane);
+  const columns = 40;
+  const rows = 25;
+  const gap = Math.max(1, Math.min(3, grid.width / 260));
+  const cellSize = Math.min((grid.width - gap * (columns - 1)) / columns, (grid.height - gap * (rows - 1)) / rows);
+  const offsetX = grid.x + (grid.width - (cellSize * columns + gap * (columns - 1))) / 2;
+  const offsetY = grid.y + (grid.height - (cellSize * rows + gap * (rows - 1))) / 2;
+
+  context.fillStyle = "#f7fafc";
+  context.fillRect(grid.x, grid.y, grid.width, grid.height);
+  context.strokeStyle = "#d8e0e5";
+  context.strokeRect(grid.x, grid.y, grid.width, grid.height);
+
+  bayesRule.cells.forEach((cell, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = offsetX + column * (cellSize + gap);
+    const y = offsetY + row * (cellSize + gap);
+    const visual = bayesRuleCellVisual(cell.status, bayesRule.phase, bayesRule.phaseProgress);
+    context.globalAlpha = visual.alpha;
+    context.fillStyle = visual.color;
+    context.fillRect(x, y, cellSize, cellSize);
+  });
+  context.globalAlpha = 1;
+
+  paintBayesRuleLegend(context, pane, grid.y + grid.height + 14);
+  paintBayesRulePipeline(context, bayesRule, pane);
+  context.restore();
+}
+
+function bayesRuleGridArea(pane: CanvasPane): CanvasPane {
+  return {
+    x: pane.x + 16,
+    y: pane.y + 68,
+    width: pane.width - 32,
+    height: Math.max(250, pane.height - 250),
+  };
+}
+
+function bayesRuleCellVisual(
+  status: NonNullable<ConceptFrame["bayesRule"]>["cells"][number]["status"],
+  phase: NonNullable<ConceptFrame["bayesRule"]>["phase"],
+  phaseProgress: number,
+) {
+  const testedPositive = status === "true-positive" || status === "false-positive";
+  const actualPositive = status === "true-positive" || status === "false-negative";
+  const colorsByStatus = {
+    "true-positive": "#0f766e",
+    "false-positive": "#b7791f",
+    "false-negative": "#7fb6ad",
+    "true-negative": "#d8e0e5",
+  };
+
+  if (phase === "population") {
+    return {
+      color: actualPositive ? "#0f766e" : "#cfd8df",
+      alpha: 0.35 + phaseProgress * (actualPositive ? 0.55 : 0.25),
+    };
+  }
+
+  if (phase === "positive-tests") {
+    return {
+      color: colorsByStatus[status],
+      alpha: testedPositive ? 0.32 + phaseProgress * 0.68 : 0.14,
+    };
+  }
+
+  return {
+    color: colorsByStatus[status],
+    alpha: status === "true-positive" ? 1 : status === "false-positive" ? 0.75 : 0.12,
+  };
+}
+
+function paintBayesRuleLegend(
+  context: CanvasRenderingContext2D,
+  pane: CanvasPane,
+  y: number,
+) {
+  const items = [
+    { label: "true positive", color: "#0f766e" },
+    { label: "false positive", color: "#b7791f" },
+    { label: "missed actual A", color: "#7fb6ad" },
+    { label: "true negative", color: "#d8e0e5" },
+  ];
+  let x = pane.x + 16;
+  items.forEach((item) => {
+    context.fillStyle = item.color;
+    context.fillRect(x, y, 10, 10);
+    context.fillStyle = "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(item.label, x + 14, y + 9);
+    x += Math.min(132, Math.max(92, context.measureText(item.label).width + 30));
+  });
+}
+
+function paintBayesRulePipeline(
+  context: CanvasRenderingContext2D,
+  bayesRule: NonNullable<ConceptFrame["bayesRule"]>,
+  pane: CanvasPane,
+) {
+  const top = pane.y + pane.height - 82;
+  const gap = 10;
+  const boxWidth = (pane.width - 32 - gap * 2) / 3;
+  const boxes = [
+    {
+      key: "population",
+      title: "Population",
+      value: `${bayesRule.population}`,
+      detail: `${bayesRule.counts.actualPositive} have A`,
+    },
+    {
+      key: "positive-tests",
+      title: "Positive tests",
+      value: `${bayesRule.counts.positiveTests}`,
+      detail: `${bayesRule.counts.falsePositive} false alarms`,
+    },
+    {
+      key: "actual-positives",
+      title: "Actual positives",
+      value: `${bayesRule.counts.truePositive}`,
+      detail: `${(bayesRule.posterior * 100).toFixed(1)}% of positives`,
+    },
+  ];
+
+  boxes.forEach((box, index) => {
+    const x = pane.x + 16 + index * (boxWidth + gap);
+    const active = box.key === bayesRule.phase;
+    paintRoundedRect(context, x, top, boxWidth, 58, 8, active ? "#e8f5f2" : "#ffffff", active ? "#0f766e" : "#d8e0e5");
+    context.fillStyle = active ? "#0f766e" : "#61707f";
+    context.font = "900 9px Inter, system-ui, sans-serif";
+    context.textAlign = "left";
+    context.fillText(fitCanvasText(context, box.title, boxWidth - 16), x + 8, top + 16);
+    context.fillStyle = "#17212b";
+    context.font = "900 16px Inter, system-ui, sans-serif";
+    context.fillText(box.value, x + 8, top + 36);
+    context.fillStyle = "#61707f";
+    context.font = "800 9px Inter, system-ui, sans-serif";
+    context.fillText(fitCanvasText(context, box.detail, boxWidth - 16), x + 8, top + 50);
+
+    if (index < boxes.length - 1) {
+      const arrowX = x + boxWidth + 2;
+      context.strokeStyle = "#9aa8b4";
+      context.fillStyle = "#9aa8b4";
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.moveTo(arrowX, top + 29);
+      context.lineTo(arrowX + gap - 4, top + 29);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(arrowX + gap - 4, top + 29);
+      context.lineTo(arrowX + gap - 9, top + 25);
+      context.lineTo(arrowX + gap - 9, top + 33);
+      context.closePath();
+      context.fill();
+    }
+  });
+}
+
+function paintBayesRuleTreePanel(
+  context: CanvasRenderingContext2D,
+  bayesRule: NonNullable<ConceptFrame["bayesRule"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Posterior = useful evidence / total evidence", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(context, bayesRuleFormulaText(bayesRule), pane.width - 28),
+    pane.x + 14,
+    pane.y + 43,
+  );
+
+  const chipTop = pane.y + 66;
+  const chipGap = 8;
+  const chipColumns = pane.width > 430 ? 3 : 2;
+  const chipWidth = (pane.width - 28 - chipGap * (chipColumns - 1)) / chipColumns;
+  const chips = [
+    { label: "P(A)", value: probabilityLabel(bayesRule.prior), color: "#2f6fbe" },
+    { label: "P(B|A)", value: probabilityLabel(bayesRule.sensitivity), color: "#0f766e" },
+    { label: "P(B|not A)", value: probabilityLabel(bayesRule.falsePositiveRate), color: "#b7791f" },
+    { label: "P(B)", value: probabilityLabel(bayesRule.evidence), color: "#6f58c9" },
+    { label: "P(B|A)P(A)", value: probabilityLabel(bayesRule.usefulEvidence), color: "#0f766e" },
+    { label: "P(A|B)", value: probabilityLabel(bayesRule.posterior), color: "#d34a43" },
+  ];
+  chips.forEach((chip, index) => {
+    const column = index % chipColumns;
+    const row = Math.floor(index / chipColumns);
+    const x = pane.x + 14 + column * (chipWidth + chipGap);
+    const y = chipTop + row * 48;
+    paintBayesRuleChip(context, x, y, chipWidth, chip.label, chip.value, chip.color);
+  });
+
+  const treeTop = chipTop + Math.ceil(chips.length / chipColumns) * 48 + 20;
+  paintBayesRuleTree(context, bayesRule, {
+    x: pane.x + 14,
+    y: treeTop,
+    width: pane.width - 28,
+    height: Math.max(190, pane.y + pane.height - treeTop - 18),
+  });
+
+  context.restore();
+}
+
+function bayesRuleFormulaText(bayesRule: NonNullable<ConceptFrame["bayesRule"]>) {
+  return `P(A|B) = (${bayesRule.sensitivity.toFixed(2)} * ${bayesRule.prior.toFixed(2)}) / ${bayesRule.evidence.toFixed(2)} = ${bayesRule.posterior.toFixed(2)}`;
+}
+
+function paintBayesRuleChip(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  label: string,
+  value: string,
+  color: string,
+) {
+  paintRoundedRect(context, x, y, width, 38, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = color;
+  context.font = "900 9px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, x + 8, y + 14);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillText(value, x + 8, y + 30);
+}
+
+function paintBayesRuleTree(
+  context: CanvasRenderingContext2D,
+  bayesRule: NonNullable<ConceptFrame["bayesRule"]>,
+  pane: CanvasPane,
+) {
+  paintRoundedRect(context, pane.x, pane.y, pane.width, pane.height, 8, "#f7fafc", "#d8e0e5");
+  const root = { x: pane.x + 24, y: pane.y + pane.height * 0.5 };
+  const middleX = pane.x + pane.width * 0.46;
+  const leafX = pane.x + pane.width - 34;
+  const a = { x: middleX, y: pane.y + pane.height * 0.28 };
+  const notA = { x: middleX, y: pane.y + pane.height * 0.72 };
+  const bGivenA = { x: leafX, y: pane.y + pane.height * 0.18 };
+  const notBGivenA = { x: leafX, y: pane.y + pane.height * 0.38 };
+  const bGivenNotA = { x: leafX, y: pane.y + pane.height * 0.62 };
+  const notBGivenNotA = { x: leafX, y: pane.y + pane.height * 0.82 };
+
+  paintBayesBranch(context, root, a, bayesRule.prior, "#2f6fbe", `A ${probabilityLabel(bayesRule.prior)}`);
+  paintBayesBranch(context, root, notA, 1 - bayesRule.prior, "#94a3b8", `not A ${probabilityLabel(1 - bayesRule.prior)}`);
+  paintBayesBranch(context, a, bGivenA, bayesRule.sensitivity, "#0f766e", `B ${probabilityLabel(bayesRule.sensitivity)}`);
+  paintBayesBranch(context, a, notBGivenA, 1 - bayesRule.sensitivity, "#7fb6ad", `not B ${probabilityLabel(1 - bayesRule.sensitivity)}`);
+  paintBayesBranch(context, notA, bGivenNotA, bayesRule.falsePositiveRate, "#b7791f", `B ${probabilityLabel(bayesRule.falsePositiveRate)}`);
+  paintBayesBranch(context, notA, notBGivenNotA, 1 - bayesRule.falsePositiveRate, "#cbd5df", `not B ${probabilityLabel(1 - bayesRule.falsePositiveRate)}`);
+
+  paintBayesNode(context, root.x, root.y, "Start", "#17212b");
+  paintBayesNode(context, a.x, a.y, "A", "#2f6fbe");
+  paintBayesNode(context, notA.x, notA.y, "not A", "#64748b");
+  paintBayesLeaf(context, bGivenA.x, bGivenA.y, `${bayesRule.counts.truePositive}`, "true +", "#0f766e");
+  paintBayesLeaf(context, notBGivenA.x, notBGivenA.y, `${bayesRule.counts.falseNegative}`, "missed", "#7fb6ad");
+  paintBayesLeaf(context, bGivenNotA.x, bGivenNotA.y, `${bayesRule.counts.falsePositive}`, "false +", "#b7791f");
+  paintBayesLeaf(context, notBGivenNotA.x, notBGivenNotA.y, `${bayesRule.counts.trueNegative}`, "true -", "#64748b");
+}
+
+function paintBayesBranch(
+  context: CanvasRenderingContext2D,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  probability: number,
+  color: string,
+  label: string,
+) {
+  context.strokeStyle = color;
+  context.lineWidth = 1.5 + probability * 5;
+  context.globalAlpha = 0.75;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.globalAlpha = 1;
+
+  const labelX = start.x + (end.x - start.x) * 0.48;
+  const labelY = start.y + (end.y - start.y) * 0.48 - 5;
+  context.fillStyle = color;
+  context.font = "900 9px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(label, labelX, labelY);
+}
+
+function paintBayesNode(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  label: string,
+  color: string,
+) {
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = color;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(x, y, 18, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.fillStyle = color;
+  context.font = "900 9px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(label, x, y + 3);
+}
+
+function paintBayesLeaf(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  value: string,
+  label: string,
+  color: string,
+) {
+  paintRoundedRect(context, x - 24, y - 18, 48, 36, 8, "#ffffff", color);
+  context.fillStyle = color;
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  context.fillText(value, x, y - 2);
+  context.fillStyle = "#61707f";
+  context.font = "800 8px Inter, system-ui, sans-serif";
+  context.fillText(label, x, y + 12);
+}
+
+function probabilityLabel(value: number) {
+  return value < 0.1 ? value.toFixed(3) : value.toFixed(2);
+}
+
+function paintGdaLesson(
+  context: CanvasRenderingContext2D,
+  frame: ConceptFrame,
+  size: Size,
+) {
+  const gda = frame.gda;
+  if (!gda) {
+    return;
+  }
+
+  const layout = gdaLayout(size);
+  context.fillStyle = "#17212b";
+  context.font = "900 13px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Generative profile topography", layout.plotPane.x, layout.plotPane.y - 24);
+  context.fillText("Gaussian discriminant state", layout.infoPane.x, layout.infoPane.y - 24);
+
+  paintGdaPlot(context, gda, layout.plotPane);
+  paintGdaInfoPanel(context, gda, layout.infoPane);
+}
+
+function gdaLayout(size: Size) {
+  const narrow = size.width < 820;
+  const padding = 24;
+  const gap = 18;
+  const plotPane: CanvasPane = narrow
+    ? { x: padding, y: 56, width: size.width - padding * 2, height: Math.max(390, size.height * 0.56) }
+    : { x: padding, y: 58, width: Math.max(500, size.width * 0.62), height: size.height - 96 };
+  const infoPane: CanvasPane = narrow
+    ? {
+        x: padding,
+        y: plotPane.y + plotPane.height + gap,
+        width: size.width - padding * 2,
+        height: Math.max(330, size.height - plotPane.height - 120),
+      }
+    : {
+        x: plotPane.x + plotPane.width + gap,
+        y: 58,
+        width: size.width - padding * 2 - plotPane.width - gap,
+        height: size.height - 96,
+      };
+
+  return { plotPane, infoPane };
+}
+
+function gdaPlotArea(pane: CanvasPane): CanvasPane {
+  return {
+    x: pane.x + 52,
+    y: pane.y + 72,
+    width: pane.width - 80,
+    height: pane.height - 126,
+  };
+}
+
+function gdaScales(gda: NonNullable<ConceptFrame["gda"]>, pane: CanvasPane) {
+  const plot = gdaPlotArea(pane);
+  return {
+    plot,
+    x: d3.scaleLinear().domain(gda.xDomain).range([plot.x, plot.x + plot.width]),
+    y: d3.scaleLinear().domain(gda.yDomain).range([plot.y + plot.height, plot.y]),
+  };
+}
+
+function paintGdaPlot(
+  context: CanvasRenderingContext2D,
+  gda: NonNullable<ConceptFrame["gda"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`${gda.mode.toUpperCase()} likelihood contours`, pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      `Click inside the plot to add a ${gda.activeClass} point · training size ${gda.trainingSize} · accuracy ${metricPercent(gda.accuracy)}`,
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const { plot, x, y } = gdaScales(gda, pane);
+  context.fillStyle = "#f7fafc";
+  context.fillRect(plot.x, plot.y, plot.width, plot.height);
+  context.strokeStyle = "#d8e0e5";
+  context.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+  paintGdaDecisionBackdrop(context, gda, plot, x, y);
+  paintGdaGrid(context, plot, x, y);
+
+  context.save();
+  context.beginPath();
+  context.rect(plot.x, plot.y, plot.width, plot.height);
+  context.clip();
+  gda.profiles.forEach((profile) => paintGdaContours(context, gda, profile, x, y));
+  gda.profiles.forEach((profile) => {
+    context.strokeStyle = profile.color;
+    context.lineWidth = 2.4;
+    context.fillStyle = "#ffffff";
+    context.beginPath();
+    context.arc(x(profile.mean.x), y(profile.mean.y), 6, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.beginPath();
+    context.moveTo(x(profile.mean.x) - 8, y(profile.mean.y));
+    context.lineTo(x(profile.mean.x) + 8, y(profile.mean.y));
+    context.moveTo(x(profile.mean.x), y(profile.mean.y) - 8);
+    context.lineTo(x(profile.mean.x), y(profile.mean.y) + 8);
+    context.stroke();
+  });
+
+  gda.points.forEach((point) => {
+    const classKey = point.label === "blue" ? "blue" : "red";
+    const color = classKey === "blue" ? "#2f6fbe" : "#d34a43";
+    context.fillStyle = color;
+    context.strokeStyle = point.label === gda.activeClass ? "#17212b" : "#ffffff";
+    context.lineWidth = point.label === gda.activeClass ? 2.2 : 1.4;
+    context.beginPath();
+    context.arc(x(point.x), y(point.y), point.label === gda.activeClass ? 5.6 : 5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  });
+  context.restore();
+
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "center";
+  x.ticks(5).forEach((tick) => {
+    context.fillText(tick.toFixed(1), x(tick), plot.y + plot.height + 18);
+  });
+  context.textAlign = "right";
+  y.ticks(5).forEach((tick) => {
+    context.fillText(tick.toFixed(1), plot.x - 8, y(tick) + 4);
+  });
+
+  const statusBox = {
+    x: pane.x + 14,
+    y: pane.y + pane.height - 42,
+    width: pane.width - 28,
+    height: 26,
+  };
+  paintRoundedRect(context, statusBox.x, statusBox.y, statusBox.width, statusBox.height, 8, "#f7fafc", "#d8e0e5");
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(
+    fitCanvasText(context, "Low training-size constraints inflate and fade the Gaussian profiles; higher values sharpen the rings.", statusBox.width - 16),
+    statusBox.x + 8,
+    statusBox.y + 17,
+  );
+
+  context.restore();
+}
+
+function paintGdaDecisionBackdrop(
+  context: CanvasRenderingContext2D,
+  gda: NonNullable<ConceptFrame["gda"]>,
+  plot: CanvasPane,
+  x: (value: number) => number,
+  y: (value: number) => number,
+) {
+  const columns = 38;
+  const rows = 28;
+  const cellWidth = plot.width / columns;
+  const cellHeight = plot.height / rows;
+  gda.decisionGrid.forEach((cell, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const color = cell.predicted === "blue" ? "47, 111, 190" : "211, 74, 67";
+    context.fillStyle = `rgba(${color}, ${0.04 + cell.margin * 0.12})`;
+    context.fillRect(plot.x + column * cellWidth, plot.y + row * cellHeight, cellWidth + 0.5, cellHeight + 0.5);
+    if (cell.margin < 0.045) {
+      context.fillStyle = "rgba(23, 33, 43, 0.28)";
+      context.fillRect(x(cell.x) - 1, y(cell.y) - 1, 2, 2);
+    }
+  });
+}
+
+function paintGdaGrid(
+  context: CanvasRenderingContext2D,
+  plot: CanvasPane,
+  x: d3.ScaleLinear<number, number>,
+  y: d3.ScaleLinear<number, number>,
+) {
+  context.strokeStyle = "rgba(100, 116, 139, 0.18)";
+  context.lineWidth = 1;
+  x.ticks(7).forEach((tick) => {
+    const tx = x(tick);
+    context.beginPath();
+    context.moveTo(tx, plot.y);
+    context.lineTo(tx, plot.y + plot.height);
+    context.stroke();
+  });
+  y.ticks(6).forEach((tick) => {
+    const ty = y(tick);
+    context.beginPath();
+    context.moveTo(plot.x, ty);
+    context.lineTo(plot.x + plot.width, ty);
+    context.stroke();
+  });
+}
+
+function paintGdaContours(
+  context: CanvasRenderingContext2D,
+  gda: NonNullable<ConceptFrame["gda"]>,
+  profile: NonNullable<ConceptFrame["gda"]>["profiles"][number],
+  x: (value: number) => number,
+  y: (value: number) => number,
+) {
+  context.save();
+  context.shadowBlur = 3 + gda.uncertainty * 14;
+  context.shadowColor = profile.color;
+  profile.contours.forEach((contour, index) => {
+    context.globalAlpha = (0.72 - index * 0.12) * (0.42 + gda.confidence * 0.58);
+    context.strokeStyle = profile.color;
+    context.lineWidth = 2.6 - index * 0.25;
+    context.beginPath();
+    contour.forEach((point, pointIndex) => {
+      const px = x(point.x);
+      const py = y(point.y);
+      if (pointIndex === 0) {
+        context.moveTo(px, py);
+      } else {
+        context.lineTo(px, py);
+      }
+    });
+    context.closePath();
+    context.stroke();
+  });
+  context.restore();
+}
+
+function paintGdaInfoPanel(
+  context: CanvasRenderingContext2D,
+  gda: NonNullable<ConceptFrame["gda"]>,
+  pane: CanvasPane,
+) {
+  context.save();
+  paintCanvasPanel(context, pane);
+
+  context.fillStyle = "#17212b";
+  context.font = "900 12px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText("Class likelihood profiles", pane.x + 14, pane.y + 22);
+  context.fillStyle = "#61707f";
+  context.font = "700 11px Inter, system-ui, sans-serif";
+  context.fillText(
+    fitCanvasText(
+      context,
+      gda.mode === "lda"
+        ? "LDA forces both classes to share one covariance shape."
+        : "QDA lets each class keep its own covariance shape.",
+      pane.width - 28,
+    ),
+    pane.x + 14,
+    pane.y + 42,
+  );
+
+  const chipTop = pane.y + 68;
+  const chipGap = 8;
+  const chipWidth = (pane.width - 28 - chipGap) / 2;
+  paintGdaStatChip(context, pane.x + 14, chipTop, chipWidth, "mode", gda.mode.toUpperCase(), "#6f58c9");
+  paintGdaStatChip(context, pane.x + 14 + chipWidth + chipGap, chipTop, chipWidth, "confidence", `${Math.round(gda.confidence * 100)}%`, "#0f766e");
+
+  const meterTop = chipTop + 74;
+  context.fillStyle = "#17212b";
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.fillText("Uncertainty blur", pane.x + 14, meterTop);
+  context.fillStyle = "#eef3f6";
+  context.fillRect(pane.x + 14, meterTop + 16, pane.width - 28, 12);
+  context.fillStyle = "#b7791f";
+  context.fillRect(pane.x + 14, meterTop + 16, (pane.width - 28) * gda.uncertainty, 12);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(
+    `${gda.trainingSize} effective examples · ${gda.uncertainty > 0.5 ? "wide, translucent profiles" : "tight, vivid profiles"}`,
+    pane.x + 14,
+    meterTop + 46,
+  );
+
+  const profileTop = meterTop + 78;
+  gda.profiles.forEach((profile, index) => {
+    const top = profileTop + index * 142;
+    if (top + 124 > pane.y + pane.height - 18) {
+      return;
+    }
+    paintGdaProfileCard(context, profile, pane.x + 14, top, pane.width - 28);
+  });
+
+  context.restore();
+}
+
+function paintGdaStatChip(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  label: string,
+  value: string,
+  color: string,
+) {
+  paintRoundedRect(context, x, y, width, 54, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = color;
+  context.font = "900 10px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(label, x + 10, y + 18);
+  context.fillStyle = "#17212b";
+  context.font = "900 15px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillText(fitCanvasText(context, value, width - 20), x + 10, y + 39);
+}
+
+function paintGdaProfileCard(
+  context: CanvasRenderingContext2D,
+  profile: NonNullable<ConceptFrame["gda"]>["profiles"][number],
+  x: number,
+  y: number,
+  width: number,
+) {
+  paintRoundedRect(context, x, y, width, 124, 8, "#ffffff", "#d8e0e5");
+  context.fillStyle = profile.color;
+  context.font = "900 11px Inter, system-ui, sans-serif";
+  context.textAlign = "left";
+  context.fillText(`${profile.label} profile`, x + 10, y + 18);
+  context.fillStyle = "#61707f";
+  context.font = "800 10px Inter, system-ui, sans-serif";
+  context.fillText(`n=${profile.count} · prior=${probabilityLabel(profile.prior)} · det=${profile.determinant.toFixed(3)}`, x + 10, y + 38);
+  context.fillText(`mean=(${profile.mean.x.toFixed(2)}, ${profile.mean.y.toFixed(2)})`, x + 10, y + 57);
+
+  const matrixTop = y + 72;
+  const cellWidth = (width - 28) / 2;
+  const values = [
+    profile.covariance[0][0],
+    profile.covariance[0][1],
+    profile.covariance[1][0],
+    profile.covariance[1][1],
+  ];
+  values.forEach((value, index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    const cellX = x + 10 + column * cellWidth;
+    const cellY = matrixTop + row * 20;
+    context.fillStyle = index % 3 === 0 ? "rgba(15, 118, 110, 0.08)" : "rgba(183, 121, 31, 0.08)";
+    context.fillRect(cellX, cellY, cellWidth - 6, 16);
+    context.fillStyle = "#17212b";
+    context.font = "900 9px ui-monospace, SFMono-Regular, Menlo, monospace";
+    context.fillText(value.toFixed(3), cellX + 5, cellY + 12);
+  });
+}
+
+function metricPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function canvasPointToGdaPoint(
+  gda: NonNullable<ConceptFrame["gda"]>,
+  size: Size,
+  point: { x: number; y: number },
+) {
+  const { plotPane } = gdaLayout(size);
+  const { plot, x, y } = gdaScales(gda, plotPane);
   if (
     point.x < plot.x ||
     point.x > plot.x + plot.width ||
